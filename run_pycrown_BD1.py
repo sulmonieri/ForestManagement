@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 """
 Desc: 
-Created on 19.01.22 17:37
+Created on 27.01.22 08:55
 @author: malle
 """
+
 
 from datetime import datetime
 
@@ -13,21 +14,21 @@ if __name__ == '__main__':
 
     TSTART = datetime.now()
 
-    F_CHM = '/home/malle/pycrown/experiment_sites/laret_test/data/CHM.tif'
-    F_DTM = '/home/malle/pycrown/experiment_sites/laret_test/data/DTM.tif'
-    F_DSM = '/home/malle/pycrown/experiment_sites/laret_test/data/DSM.tif'
+    F_CHM = '/home/malle/pycrown/experiment_sites/BD1/data/CHM.tif'
+    F_DTM = '/home/malle/pycrown/experiment_sites/BD1/data/DTM.tif'
+    F_DSM = '/home/malle/pycrown/experiment_sites/BD1/data/DSM.tif'
     F_LAS = ''
 
-    PC = PyCrown(F_CHM, F_DTM, F_DSM, outpath='/home/malle/pycrown/experiment_sites/laret_test/result')
+    PC = PyCrown(F_CHM, F_DTM, F_DSM, outpath='/home/malle/pycrown/experiment_sites/BD1/result/dalponteCIRC_numba_10Mrad_ws4_chm4_thseed02')
 
     # Cut off edges
     # PC.clip_data_to_bbox((1802200, 1802400, 5467250, 5467450))
 
     # Smooth CHM with 5m median filter
-    PC.filter_chm(3, ws_in_pixels=True)
+    PC.filter_chm(4, ws_in_pixels=True)
 
     # Tree Detection with local maximum filter
-    PC.tree_detection(PC.chm, ws=3, ws_in_pixels=True, hmin=3.)
+    PC.tree_detection(PC.chm, ws=4, ws_in_pixels=True, hmin=3.)
 
     # Clip trees to bounding box (no trees on image edge)
     # original extent: 1802140, 1802418, 5467295, 5467490
@@ -36,8 +37,8 @@ if __name__ == '__main__':
     PC.clip_trees_to_bbox(inbuf=0.5)  # inward buffer of 11 metre
 
     # Crown Delineation
-    PC.crown_delineation(algorithm='dalponte_numba', th_tree=3.,
-                         th_seed=0.7, th_crown=0.55, max_crown=20.)
+    PC.crown_delineation(algorithm='dalponteCIRC_numba', th_tree=3.,
+                         th_seed=0.2, th_crown=0.55, max_crown=10.)
 
     # Correct tree tops on steep terrain
     PC.correct_tree_tops()

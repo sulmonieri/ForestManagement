@@ -48,6 +48,7 @@ for site in sites:
 
     # def. all output files/locations:
     chm_cut = os.path.join(wrk_dir, site, "CHM.tif")
+    chm_cut_neg = os.path.join(wrk_dir, site, "CHM_incl_neg.tif")
     dtm_cut_orig = os.path.join(wrk_dir, site, site + "_dtm_cut_orig.tif")
     dtm_cut = os.path.join(wrk_dir, site, "DTM.tif")
     dsm_cut = os.path.join(wrk_dir, site, "DSM.tif")
@@ -75,7 +76,7 @@ for site in sites:
     rows_chm = off_lry - off_uly
     columns_chm = off_lrx - off_ulx
     # create new clipped CHM file:
-    out_ds = gtiff_driver.Create(chm_cut, columns_chm, rows_chm, 1, gdal.GDT_Float32)
+    out_ds = gtiff_driver.Create(chm_cut_neg, columns_chm, rows_chm, 1, gdal.GDT_Float32)
     out_ds.SetProjection(in_chm.GetProjection())
     subset_ulx, subset_uly = gdal.ApplyGeoTransform(in_gt_chm, off_ulx, off_uly)
     out_gt = list(in_gt_chm)
@@ -88,6 +89,13 @@ for site in sites:
     out_band.FlushCache()   # write to disk
     out_band = None  # close properly! (important!!)
     out_ds = None  # close properly! (important!!)
+
+    # this includes negative CHM values -> actually set to 0!
+    if os.path.exists(chm_cut):
+        os.remove(chm_cut)
+    # use gdal lib (file can't exist yet!)
+    args1 = ['gdal_calc.py', '-A', chm_cut_neg, '--outfile', chm_cut, '--calc', 'A*(A>=0)', '--NoDataValue', '0']
+    result1 = subprocess.call(args1)
 
     # 2) DTM:
     offsets_ul = gdal.ApplyGeoTransform(inv_gt_dtm, ul_x, ul_y)

@@ -9,16 +9,20 @@ import gdal
 import numpy as np
 import geopandas as gpd
 from matplotlib.widgets import LassoSelector
-from matplotlib.path import Path
+from matplotlib.path import Path as Path1
+import matplotlib.pyplot as plt
 from shapely.geometry import Point
 import rasterio
 import fiona
 import pandas as pd
 import rasterio.mask
-import os
-import matplotlib.pyplot as plt
 from osgeo import ogr
 import random
+import time
+from pathlib import Path
+import click
+
+USE_CLI_ARGS = True  # set to True if running from the command line, set to False if running from PyCharm
 
 
 class ManualSelect:
@@ -38,7 +42,7 @@ class ManualSelect:
         self.ind = []
 
     def onselect(self, verts):
-        path = Path(verts)
+        path = Path1(verts)
         self.ind = np.nonzero(path.contains_points(self.xys))[0]
         self.fc[:, -1] = self.alpha_other
         self.fc[self.ind, -1] = 1
@@ -52,8 +56,38 @@ class ManualSelect:
         self.canvas.draw_idle()
 
 
-def update_chm(sel_pts):
-    # find all crowns + tree tops that need to be eliminated (don't have the same id...)
+def update_chm(sel_pts, pycrown_out):
+    """
+    Find all crowns + tree tops that need to be eliminated and update/create TIFs accordingly
+
+    Parameters
+    ==========
+    sel_pts : np.array
+        selected points to cut from canopy height model
+
+    pycrown_out : Path Object
+        path to input/output folder
+
+    Returns
+    =======
+    top_cor_cut : np.array
+        new array of all points of top of the canopy
+    crown_rast_cut: np.array
+        new array of all crown polygons
+    """
+
+    driver = ogr.GetDriverByName("ESRI Shapefile")
+
+    top_cor_new = pycrown_out / "tree_location_top_cor_new.shp"
+    chm_pc_adapt = pycrown_out / "chm_new.tif"
+    crown_rast_new = pycrown_out / "tree_crown_poly_raster_new.shp"
+
+    crown_rast = pycrown_out / "tree_crown_poly_raster.shp"
+    crown_rast_all = gpd.GeoDataFrame.from_file(str(crown_rast))
+
+    top_cor = pycrown_out / "tree_location_top_cor.shp"
+    top_cor_all = gpd.GeoDataFrame.from_file(str(top_cor))
+
     ids_crown = []
     ids_top = []
     for num in range(len(sel_pts)):
@@ -70,20 +104,22 @@ def update_chm(sel_pts):
     crown_rast_cut = crown_rast_all.loc[~crown_rast_all['DN'].isin(np.array(ids_crown))]
 
     # Remove output shapefiles if they already exist
-    if os.path.exists(crown_rast_new):
-        driver.DeleteDataSource(crown_rast_new)
-    if os.path.exists(top_cor_new):
-        driver.DeleteDataSource(top_cor_new)
+    if crown_rast_new.exists:
+        driver.DeleteDataSource(str(crown_rast_new))
+    if top_cor_new.exists:
+        driver.DeleteDataSource(str(top_cor_new))
     # Write new shapefiles:
     top_cor_cut.to_file(top_cor_new)
     crown_rast_cut.to_file(crown_rast_new)
 
-    # now deal with cutting chm too:
+    # cut CHM:
+    crown_rast = pycrown_out / "tree_crown_poly_raster.shp"
     with fiona.open(crown_rast, "r") as shapefile:
         shapes = [feature["geometry"] for feature in shapefile]
 
     shapes_series = pd.Series(shapes)
 
+    chm_pc = pycrown_out / "chm.tif"
     with rasterio.open(chm_pc) as src:
         out_image, out_transform = rasterio.mask.mask(src, shapes_series[ids_crown], crop=False, invert=True)
         out_meta = src.meta
@@ -145,71 +181,121 @@ def raster2array(geotif_file):
         print('More than one band ... need to modify function for case of multiple bands')
 
 
-def plot_figs(top_cor_cut, crown_rast_cut):
+def plot_figs(top_cor_cut, crown_rast_all, crown_rast_cut, x, y, pycrown_out, fig_comp):
 
-    chm_array_new, chm_array_metadata_new = raster2array(chm_pc_adapt)
+    chm_pc_adapt = pycrown_out / "chm_new.tif"
+    chm_array_new, chm_array_metadata_new = raster2array(str(chm_pc_adapt))
 
-    fig1 = plt.figure(figsize=(15, 9))
-    print(fig1)
+    chm_pc = pycrown_out / "chm.tif"
+    chm_array, chm_array_metadata = raster2array(str(chm_pc))
+
+    fig1 = plt.figure(figsize=(13, 4))
     ax_old = fig1.add_subplot(121)
-    ax_old.set_title('Original CHM')
+    ax_old.set_title('Original CHM \n #Trees = '+str(len(x)), fontsize=9)
     plt.imshow(chm_array, extent=chm_array_metadata['extent'], alpha=1)
-    cbar = plt.colorbar(fraction=0.046, pad=0.04)
-    cbar.set_label('Canopy height [m]', rotation=270, labelpad=20)
+    cbar1 = plt.colorbar(fraction=0.046, pad=0.04)
+    cbar1.set_label('Canopy height [m]', rotation=270, labelpad=20)
     crown_rast_all.plot(ax=ax_old, color='w', alpha=0.6, edgecolor='r', linewidth=0.5)
-    plt.scatter(x, y, s=1, marker='x', color='r', linewidth=0.2)
+    ax_old.scatter(x, y, s=1, marker='x', color='r', linewidth=0.2)
 
     ax_new = fig1.add_subplot(122)
-    ax_new.set_title('Modified CHM')
+    ax_new.set_title('Modified CHM\n #Trees = '+str(len(top_cor_cut['geometry'].x)), fontsize=9)
     plt.imshow(chm_array_new, extent=chm_array_metadata_new['extent'], alpha=1)
-    cbar = plt.colorbar(fraction=0.046, pad=0.04)
-    cbar.set_label('Canopy height [m]', rotation=270, labelpad=20)
+    cbar2 = plt.colorbar(fraction=0.046, pad=0.04)
+    cbar2.set_label('Canopy height [m]', rotation=270, labelpad=20)
     crown_rast_cut.plot(ax=ax_new, color='w', alpha=0.6, edgecolor='r', linewidth=0.4)
     ax_new.scatter(top_cor_cut['geometry'].x, top_cor_cut['geometry'].y, s=1, marker='x', color='r', linewidth=0.2)
-
-    fig_comp = os.path.join(pycrown_out, "comp_chm"+cut_trees_method+".png")
-    print(fig_comp)
-    fig1.savefig(fig_comp, dpi=300, bbox_inches='tight')
+    fig1.savefig(fig_comp, dpi=350, bbox_inches='tight')
     plt.close()
 
 
-if __name__ == '__main__':
+def manual_cutting(pycrown_out, crown_rast_all, x, y, *_):
 
-    cut_trees_method = 'manual'  # need to update later but for now select here if
-    # trees are cut automatically or manual selection .. options: 'manual' , 'auto' -
-    # if set to auto also need to define how many trees to cut
-    amount_trees_cut = 2  # if using auto setting - how many trees to cut?
-    random_fraction_cut = 0.5  # if using random setting - which fraction should be cut?
-
-    driver = ogr.GetDriverByName("ESRI Shapefile")
-
-    pycrown_out = '/home/malle/pycrown/experiment_sites/BD1/result/dalponteCIRC_numba_10Mrad_ws4_chm4'
-    chm_pc = os.path.join(pycrown_out, "chm.tif")
-    chm_pc_adapt = os.path.join(pycrown_out, "chm_new.tif")
-    crown_rast = os.path.join(pycrown_out, "tree_crown_poly_raster.shp")
-    crown_rast_new = os.path.join(pycrown_out, "tree_crown_poly_raster_new.shp")
-    crown_rast_all = gpd.GeoDataFrame.from_file(crown_rast)
-
-    top_cor = os.path.join(pycrown_out, "tree_location_top_cor.shp")
-    top_cor_new = os.path.join(pycrown_out, "tree_location_top_cor_new.shp")
-    top_cor_all = gpd.GeoDataFrame.from_file(top_cor)
-    fig_comp = os.path.join(pycrown_out, "comp_chm.png")
-
-    dataSource_tops = driver.Open(top_cor, 0)
-    dataSource_crown = driver.Open(crown_rast, 0)
-    lyr_tops = dataSource_tops.GetLayer()
-    lyr_crown = dataSource_crown.GetLayer()
+    chm_pc = pycrown_out / "chm.tif"
+    chm_array, chm_array_metadata = raster2array(str(chm_pc))
 
     fig = plt.figure(figsize=(10, 10))
     ax = fig.add_subplot(111)
-
-    chm_array, chm_array_metadata = raster2array(chm_pc)
-
     plt.imshow(chm_array, extent=chm_array_metadata['extent'], alpha=0.6)
     cbar = plt.colorbar(fraction=0.046, pad=0.04)
     cbar.set_label('Canopy height [m]', rotation=270, labelpad=20)
-
     crown_rast_all.plot(ax=ax, color='w', alpha=0.6, edgecolor='r', linewidth=0.4)
+    pts = ax.scatter(x, y, s=5, marker='x', color='r')
+    ax.axis('equal')
+    ax.get_xaxis().set_ticks([])
+    ax.get_yaxis().set_ticks([])
+
+    selector = ManualSelect(ax, pts)
+
+    def accept(event):
+        if event.key == "enter":
+            global selected_pts1
+            selected_pts1 = np.array(selector.xys[selector.ind].data)
+            selector.disconnect()
+            ax.set_title("")
+            fig.canvas.draw()
+            plt.close()
+            plt.ioff()
+
+    fig.canvas.mpl_connect("key_press_event", accept)
+    ax.set_title("Press enter to accept selected points.")
+
+    plt.show()
+    selected_pts = selected_pts1
+    return selected_pts
+
+
+def random_cutting(_0, _1, _2, _3, top_cor_all, random_fraction_cut, _4):
+    all_trees = top_cor_all['geometry']
+    x_coords = all_trees.x
+    y_coords = all_trees.y
+
+    ids_all = np.array(range(0, len(x_coords) - 1))
+    num_to_select = int(len(x_coords) * random_fraction_cut)
+    list_of_random_items = random.sample(list(ids_all), num_to_select)
+
+    sel_pts_x = x_coords[np.array(list_of_random_items)]
+    sel_pts_y = y_coords[np.array(list_of_random_items)]
+    selected_pts = np.transpose(np.array([sel_pts_x, sel_pts_y]))
+    return selected_pts
+
+
+def auto_cutting(_0, _1, _2, _3, top_cor_all, _4, amount_trees_cut):
+    all_trees = top_cor_all['geometry']
+    x_coords = all_trees.x
+    y_coords = all_trees.y
+    sel_pts_x = x_coords[::amount_trees_cut]
+    sel_pts_y = y_coords[::amount_trees_cut]
+    selected_pts = np.transpose(np.array([sel_pts_x, sel_pts_y]))
+    return selected_pts
+
+
+def main(cut_trees_method, amount_trees_cut, random_fraction_cut, path_data):
+    tt = time.time()
+    timeit1 = 'Selected points to cut successfully [{:.3f}s]'
+    timeit2 = 'Cut & output CHM/crowns/tops successfully [{:.3f}s]'
+    timeit3 = 'Output figure generated and saved [total time = {:.3f}s]'
+
+    driver = ogr.GetDriverByName("ESRI Shapefile")
+
+    pycrown_out = Path(path_data)
+    crown_rast = pycrown_out / "tree_crown_poly_raster.shp"
+    crown_rast_all = gpd.GeoDataFrame.from_file(str(crown_rast))
+
+    if cut_trees_method == 'manual':
+        fig_comp = pycrown_out / ("comp_chm_"+cut_trees_method+".png")
+        cutting_method = manual_cutting
+    elif cut_trees_method == 'random':
+        fig_comp = pycrown_out / ("comp_chm_"+cut_trees_method+"_"+str(random_fraction_cut)+".png")
+        cutting_method = random_cutting
+    elif cut_trees_method == 'auto':
+        fig_comp = pycrown_out / ("comp_chm_"+cut_trees_method+"_"+str(amount_trees_cut)+".png")
+        cutting_method = auto_cutting
+
+    top_cor = pycrown_out / "tree_location_top_cor.shp"
+    top_cor_all = gpd.GeoDataFrame.from_file(str(top_cor))
+    datasource_tops = driver.Open(str(top_cor), 0)
+    lyr_tops = datasource_tops.GetLayer()
 
     x = []
     y = []
@@ -217,60 +303,39 @@ if __name__ == '__main__':
         geom = row.geometry()
         x.append(geom.GetX())
         y.append(geom.GetY())
-        # print(row.GetField("DN"), row.GetField("TH"))
 
-    pts = plt.scatter(x, y, s=5, marker='x', color='r')
+    selected_pts = cutting_method(pycrown_out, crown_rast_all, x, y, top_cor_all, random_fraction_cut, amount_trees_cut)
 
-    plt.axis('equal')
-    plt.gca().get_xaxis().set_ticks([])
-    plt.gca().get_yaxis().set_ticks([])
+    print(timeit1.format(time.time() - tt))
+    top_cor_cut, crown_rast_cut = update_chm(selected_pts, pycrown_out)
 
-    if cut_trees_method == 'manual':
+    print(timeit2.format(time.time() - tt))
+    plot_figs(top_cor_cut, crown_rast_all, crown_rast_cut, x, y, pycrown_out, fig_comp)
 
-        selector = ManualSelect(ax, pts)
+    print(timeit3.format(time.time() - tt))
+    return None
 
-        def accept(event):
-            if event.key == "enter":
-                print("Selected points:")
-                print(selector.xys[selector.ind])
-                selected_pts1 = np.array(selector.xys[selector.ind].data)
-                top_cor_cut, crown_rast_cut = update_chm(selected_pts1)
-                selector.disconnect()
-                ax.set_title("")
-                fig.canvas.draw()
-                plt.close()
-                plt.ioff()
-                plot_figs(top_cor_cut, crown_rast_cut)
 
-        fig.canvas.mpl_connect("key_press_event", accept)
-        ax.set_title("Press enter to accept selected points.")
+@click.command()
+@click.option('--cut_trees_method', help='auto or random or manual [str]')
+@click.option('--amount_trees_cut', default=None, type=float, help='only needs to be set if auto - '
+                                                                   'every xth tree to be cut [float]')
+@click.option('--random_fraction_cut', default=None, type=float, help='only needs to be set if random - '
+                                                                      'fraction of dataset to be cut [float]')
+@click.option('--path_in', help='input path [str]')
+def cli(cut_trees_method, amount_trees_cut, random_fraction_cut, path_in):
+    main(cut_trees_method, amount_trees_cut, random_fraction_cut, path_in)
 
-        plt.show()
-        plt.close()
-        plt.ioff()
 
-    elif cut_trees_method == 'auto':
-        all_trees = top_cor_all['geometry']
-        x_coords = all_trees.x
-        y_coords = all_trees.y
+if __name__ == '__main__':
 
-        sel_pts_x = x_coords[::amount_trees_cut]
-        sel_pts_y = y_coords[::amount_trees_cut]
-        selected_pts = np.transpose(np.array([sel_pts_x, sel_pts_y]))
-        top_cor_cut, crown_rast_cut = update_chm(selected_pts)
-        plot_figs(top_cor_cut, crown_rast_cut)
+    if USE_CLI_ARGS:
+        cli()
+    else:
+        cut_trees_method = 'random'  # options: 'manual' , 'auto', 'random'-
+        amount_trees_cut = 2  # if using auto setting - every xth tree to cut
+        random_fraction_cut = 0.2  # if using random setting - which fraction of all trees should be cut?
 
-    elif cut_trees_method == 'random':
-        all_trees = top_cor_all['geometry']
-        x_coords = all_trees.x
-        y_coords = all_trees.y
+        path_in = '/home/malle/pycrown/experiment_sites/BD1/result/dalponteCIRC_numba_10Mrad_ws4_chm4'
 
-        ids_all = np.array(range(0, len(x_coords)-1))
-        num_to_select = int(len(x_coords) * random_fraction_cut)
-        list_of_random_items = random.sample(list(ids_all), num_to_select)
-
-        sel_pts_x = x_coords[np.array(list_of_random_items)]
-        sel_pts_y = y_coords[np.array(list_of_random_items)]
-        selected_pts = np.transpose(np.array([sel_pts_x, sel_pts_y]))
-        top_cor_cut, crown_rast_cut = update_chm(selected_pts)
-        plot_figs(top_cor_cut, crown_rast_cut)
+        main(cut_trees_method, amount_trees_cut, random_fraction_cut, path_in)
