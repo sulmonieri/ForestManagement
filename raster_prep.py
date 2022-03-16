@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Calculate DTM, DSM, CHM from CH-wide datasets for a given extent
+Calculate and save DTM, DSM, CHM from CH-wide datasets for a given spatial extent
 Created on 17.01.22 17:37
 @author: malle
 """
@@ -16,6 +16,22 @@ import numpy as np
 
 
 def raster2array(geotif_file):
+    """
+    Convert raster to array
+
+    Parameters
+    ==========
+    geotif_file : path to .tif
+        geotif of CHM
+
+    Returns
+    =======
+    chm_array : array
+        new array of all points in .tif
+    chm_array_metadata: string
+        all metadata used to convert raster2array
+    """
+
     metadata = {}
     dataset = gdal.Open(geotif_file)
     metadata['array_rows'] = dataset.RasterYSize
@@ -95,7 +111,7 @@ gtiff_driver = gdal.GetDriverByName('GTiff')
 # all BD sites:
 for site in sites:
     site = os.path.basename(site)
-    chm_plot = os.path.join(plot_dir,"CHM_"+str(site)+".png")
+    chm_plot = os.path.join(plot_dir, "CHM_"+str(site)+".png")
     # def. all output files/locations:
     chm_cut = os.path.join(wrk_dir, site, "CHM.tif")
     chm_cut_neg = os.path.join(wrk_dir, site, "CHM_incl_neg.tif")
@@ -148,7 +164,7 @@ for site in sites:
     result1 = subprocess.call(args1)
 
     chm_array, chm_array_metadata = raster2array(chm_cut)
-    chm_array[chm_array<1]=np.nan
+    chm_array[chm_array < 1] = np.nan
     # 1b - plot CHM
     fig1 = plt.figure(figsize=(13, 4))
     ax_old = fig1.add_subplot(111)

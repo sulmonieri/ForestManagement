@@ -1,6 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-Desc: take pycrown output and manipulate shapefiles/chm
+Desc: Script to manipulate shapefiles (canopy height models) for land use change experiments
+3 Options implemented to remove trees: 'manual' , 'auto', 'random'
+'manual' allows user to select area of interest to remove all trees within selected perimeter (e.g. wind-throw events)
+'auto' allows user to specify a number, based on which every xth tree will be removed
+'random ' allows user to specify fraction of forest which will be randomly removed
+
 Created on 20.01.22 09:28
 @author: malle
 """
@@ -136,6 +141,22 @@ def update_chm(sel_pts, pycrown_out):
 
 
 def raster2array(geotif_file):
+    """
+    Convert raster to array
+
+    Parameters
+    ==========
+    geotif_file : path to .tif
+        geotif of CHM
+
+    Returns
+    =======
+    chm_array : array
+        new array of all points in .tif
+    chm_array_metadata: string
+        all metadata used to convert raster2array
+    """
+
     metadata = {}
     dataset = gdal.Open(geotif_file)
     metadata['array_rows'] = dataset.RasterYSize
