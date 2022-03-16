@@ -11,12 +11,62 @@ from osgeo import gdal
 from pathlib import Path
 import shutil
 import subprocess
+import matplotlib.pyplot as plt
+import numpy as np
+
+
+def raster2array(geotif_file):
+    metadata = {}
+    dataset = gdal.Open(geotif_file)
+    metadata['array_rows'] = dataset.RasterYSize
+    metadata['array_cols'] = dataset.RasterXSize
+    metadata['bands'] = dataset.RasterCount
+    metadata['driver'] = dataset.GetDriver().LongName
+    metadata['projection'] = dataset.GetProjection()
+    metadata['geotransform'] = dataset.GetGeoTransform()
+
+    mapinfo = dataset.GetGeoTransform()
+    metadata['pixelWidth'] = mapinfo[1]
+    metadata['pixelHeight'] = mapinfo[5]
+
+    metadata['ext_dict'] = {}
+    metadata['ext_dict']['xMin'] = mapinfo[0]
+    metadata['ext_dict']['xMax'] = mapinfo[0] + dataset.RasterXSize/mapinfo[1]
+    metadata['ext_dict']['yMin'] = mapinfo[3] + dataset.RasterYSize/mapinfo[5]
+    metadata['ext_dict']['yMax'] = mapinfo[3]
+
+    metadata['extent'] = (metadata['ext_dict']['xMin'], metadata['ext_dict']['xMax'],
+                          metadata['ext_dict']['yMin'], metadata['ext_dict']['yMax'])
+
+    if metadata['bands'] == 1:
+        raster = dataset.GetRasterBand(1)
+        metadata['noDataValue'] = raster.GetNoDataValue()
+        metadata['scaleFactor'] = raster.GetScale()
+
+        # band statistics
+        metadata['bandstats'] = {}  # make a nested dictionary to store band stats in same
+        stats = raster.GetStatistics(True, True)
+        metadata['bandstats']['min'] = round(stats[0], 2)
+        metadata['bandstats']['max'] = round(stats[1], 2)
+        metadata['bandstats']['mean'] = round(stats[2], 2)
+        metadata['bandstats']['stdev'] = round(stats[3], 2)
+
+        array = dataset.GetRasterBand(1).ReadAsArray(0, 0, metadata['array_cols'],
+                                                     metadata['array_rows']).astype(float)
+        array[array == int(metadata['noDataValue'])] = np.nan
+        array = array/metadata['scaleFactor']
+        return array, metadata
+
+    elif metadata['bands'] > 1:
+        print('More than one band ... need to modify function for case of multiple bands')
+
 
 # somehow without this it can't find the proj.db file...
 os.environ['PROJ_LIB'] = '/home/malle/miniconda3/envs/SetUp_sites/share/proj'
 
 # define paths etc.
 wrk_dir = '/home/malle/slfhome/Postdoc2/experiment_sites'
+plot_dir = '/home/malle/slfhome/Postdoc2/BD_sites/CHMs'
 sites = os.listdir(wrk_dir)
 pycrown_dir = '/home/malle/pycrown/experiment_sites'
 
@@ -45,7 +95,7 @@ gtiff_driver = gdal.GetDriverByName('GTiff')
 # all BD sites:
 for site in sites:
     site = os.path.basename(site)
-
+    chm_plot = os.path.join(plot_dir,"CHM_"+str(site)+".png")
     # def. all output files/locations:
     chm_cut = os.path.join(wrk_dir, site, "CHM.tif")
     chm_cut_neg = os.path.join(wrk_dir, site, "CHM_incl_neg.tif")
@@ -96,6 +146,18 @@ for site in sites:
     # use gdal lib (file can't exist yet!)
     args1 = ['gdal_calc.py', '-A', chm_cut_neg, '--outfile', chm_cut, '--calc', 'A*(A>=0)', '--NoDataValue', '0']
     result1 = subprocess.call(args1)
+
+    chm_array, chm_array_metadata = raster2array(chm_cut)
+    chm_array[chm_array<1]=np.nan
+    # 1b - plot CHM
+    fig1 = plt.figure(figsize=(13, 4))
+    ax_old = fig1.add_subplot(111)
+    ax_old.set_title('Original CHM @ '+str(site), fontsize=9)
+    plt.imshow(chm_array, extent=chm_array_metadata['extent'], alpha=1)
+    cbar1 = plt.colorbar(fraction=0.046, pad=0.04)
+    cbar1.set_label('Canopy height [m]', rotation=270, labelpad=20)
+    fig1.savefig(chm_plot, dpi=350, bbox_inches='tight')
+    plt.close()
 
     # 2) DTM:
     offsets_ul = gdal.ApplyGeoTransform(inv_gt_dtm, ul_x, ul_y)
