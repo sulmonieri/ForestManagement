@@ -13,7 +13,7 @@ Created on 20.01.22 09:28
 import gdal
 import numpy as np
 import geopandas as gpd
-from matplotlib.widgets import LassoSelector, PolygonSelector
+from matplotlib.widgets import PolygonSelector
 from matplotlib.path import Path as Path1
 import matplotlib.pyplot as plt
 from shapely.geometry import Point, Polygon
@@ -29,9 +29,7 @@ import shutil
 import rioxarray
 import os
 import subprocess
-import matplotlib.path as mpltPath
-from scipy.spatial import ConvexHull
-import alphashape as aps
+
 
 USE_CLI_ARGS = False  # set to True if running from the command line, set to False if running from PyCharm
 
@@ -50,14 +48,13 @@ class ManualSelect:
         self.fc = np.tile(self.fc, (self.Npts, 1))
 
         self.poly = PolygonSelector(ax1, self.onselect,
-                                    props = dict(color='g', alpha=1),
-                                    handle_props = dict(mec='g', mfc='g', alpha=1))
+                                    props=dict(color='g', alpha=1),
+                                    handle_props=dict(mec='g', mfc='g', alpha=1))
         self.path = None
         self.ind = []
 
     def onselect(self, verts):
         path = Path1(verts)
-        verts_int = verts
         self.ind = np.nonzero(path.contains_points(self.xys))[0]
         self.fc[:, -1] = self.alpha_other
         self.fc[self.ind, -1] = 1
@@ -114,7 +111,8 @@ def convex_hull(points):
     return lower[:-1] + upper[:-1]
 
 
-def update_chm(sel_pts, pycrown_out, name_chm, cut_trees_method, buffer, forest_mask, poly_2cut, crown_rast_all, top_cor_all):
+def update_chm(sel_pts, pycrown_out, name_chm, cut_trees_method1, buffer, forest_mask, poly_2cut, crown_rast_all,
+               top_cor_all):
     """
     Find all crowns + tree tops that need to be eliminated and update/create TIFs accordingly
 
@@ -129,7 +127,7 @@ def update_chm(sel_pts, pycrown_out, name_chm, cut_trees_method, buffer, forest_
     name_chm : str
         add on for CHM name
 
-    cut_trees_method : str
+    cut_trees_method1 : str
         manual/auto/random?
 
     Returns
@@ -153,7 +151,7 @@ def update_chm(sel_pts, pycrown_out, name_chm, cut_trees_method, buffer, forest_
     top_cor_all.reset_index(drop=True, inplace=True)
     crown_rast_all.reset_index(drop=True, inplace=True)
 
-    df_coords = pd.DataFrame({'x': sel_pts[:,0], 'y': sel_pts[:,1]})
+    df_coords = pd.DataFrame({'x': sel_pts[:, 0], 'y': sel_pts[:, 1]})
     df_coords['coords'] = list(zip(df_coords['x'], df_coords['y']))
     df_coords['coords'] = df_coords['coords'].apply(Point)
     no_for = gpd.GeoSeries(df_coords['coords'])
@@ -162,21 +160,6 @@ def update_chm(sel_pts, pycrown_out, name_chm, cut_trees_method, buffer, forest_
 
     crown_rast_cut = crown_rast_all.drop(crown_rast_all.index[to_mask_layer23])
     top_cor_cut = top_cor_all.drop(top_cor_all.index[to_mask_layer231])
-
-   # ids_crown = []
-    #ids_top = []
-    #for num in range(len(sel_pts)):
-   #     idc = crown_rast_all.contains(Point(sel_pts[num, :]))
-    #    idc1 = np.where(idc)[0]
-    #    if idc1.size != 0:
-    #        ids_crown.append(idc1[0])
-    #    id_t = top_cor_all.contains(Point(sel_pts[num, :]))
-    #    id_t1 = np.where(id_t)[0]
-    #    ids_top.append(id_t1[0])
-
-    # cut geopandas files to exclude eliminated trees
-    #top_cor_cut = top_cor_all.loc[~top_cor_all['DN'].isin(np.array(ids_top))]
-    #crown_rast_cut = crown_rast_all.loc[~crown_rast_all['DN'].isin(np.array(ids_crown))]
 
     # Remove output shapefiles if they already exist
     if crown_rast_new.exists:
@@ -190,13 +173,11 @@ def update_chm(sel_pts, pycrown_out, name_chm, cut_trees_method, buffer, forest_
     # if manual, lay a convex hull around outermost dimension of selected tree crown polygons and cut out everything
     # within it; if automatic/random, only cut out trees that are above 10m (selected in previous step), and apply a 1m
     # buffer around each tree top polygon
-    if cut_trees_method == 'manual':
+    if cut_trees_method1 == 'manual':
         a2 = ([[p[0], p[1]] for p in np.array(poly_2cut)[0]])
         hull_to_cut = pd.Series(Polygon(a2))
-        # hull_to_cut = pd.Series(aps.alphashape(sel_pts, 0.2)) # 0.2 is a toggle param for best concave hull
         cut_out_chm = hull_to_cut
     else:
-        #shapefile_cut_10m = shapefile[(shapefile['DN'].isin(ids_crown))]['geometry']
         to_mask_layer23a = shapefile["geometry"].apply(lambda x: no_for.within(x).any())
         shapefile_cut_10m = shapefile.drop(shapefile.index[~to_mask_layer23a])
         shapefile_cut_10m_buffer = shapefile_cut_10m.buffer(buffer)
@@ -302,19 +283,17 @@ def plot_figs(top_cor_cut, crown_rast_all, crown_rast_cut, x, y, pycrown_out, fi
     fig1 = plt.figure(figsize=(14, 6))
     ax_old = fig1.add_subplot(121)
     ax_old.set_title('Original CHM \n #Trees = '+str(len(x)), fontsize=9)
-    plt.imshow(chm_array[200:-200,200:-200], extent=ex2, alpha=1)
-    #cbar1 = plt.colorbar(fraction=0.046, pad=0.04)
-    #cbar1.set_label('Canopy height [m]', rotation=270, labelpad=20)
+    plt.imshow(chm_array[200:-200, 200:-200], extent=ex2, alpha=1)
     crown_rast_all.plot(ax=ax_old, facecolor='none', alpha=0.7, edgecolor='cyan', linewidth=0.4)
-    plt.contour(np.flipud(dtm_array[200:-200,200:-200]), extent = ex2b, linewidths = 1.3, colors="red",
+    plt.contour(np.flipud(dtm_array[200:-200, 200:-200]), extent=ex2b, linewidths=1.3, colors="red",
                 levels=list(range(0, 3000, 100)))
-    plt.contour(np.flipud(dtm_array[200:-200,200:-200]), extent = ex2b, linewidths = 0.7, colors="red",
+    plt.contour(np.flipud(dtm_array[200:-200, 200:-200]), extent=ex2b, linewidths=0.7, colors="red",
                 levels=list(range(0, 3000, 10)))
-    #ax_old.scatter(x, y, s=1, marker='x', color='r', linewidth=0.2)
+    # ax_old.scatter(x, y, s=1, marker='x', color='r', linewidth=0.2)
 
     ax_new = fig1.add_subplot(122)
     ax_new.set_title('Modified CHM\n #Trees = '+str(len(top_cor_cut['geometry'].x)), fontsize=9)
-    plt.imshow(chm_array_new[200:-200,200:-200], extent=ex2a, alpha=1)
+    plt.imshow(chm_array_new[200:-200, 200:-200], extent=ex2a, alpha=1)
     cbar2 = plt.colorbar(fraction=0.046, pad=0.04)
     cbar2.set_label('Canopy height [m]', rotation=270, labelpad=20)
     fig1.savefig(fig_comp, dpi=350, bbox_inches='tight')
@@ -343,7 +322,7 @@ def manual_cutting(pycrown_out, crown_rast_all_in, x, y, *_):
 
     fig = plt.figure(figsize=(10, 10))
     ax = fig.add_subplot(111)
-    plt.imshow(chm_array[200:-200,200:-200], extent=ex2, alpha=0.7)
+    plt.imshow(chm_array[200:-200, 200:-200], extent=ex2, alpha=0.7)
     cbar = plt.colorbar(fraction=0.046, pad=0.04)
     cbar.set_label('Canopy height [m]', rotation=270, labelpad=20)
     crown_rast_all_in.plot(ax=ax, facecolor='none', alpha=0.8, edgecolor='cyan', linewidth=0.4)
@@ -351,13 +330,13 @@ def manual_cutting(pycrown_out, crown_rast_all_in, x, y, *_):
     ax.axis('equal')
     ax.get_xaxis().set_ticks([])
     ax.get_yaxis().set_ticks([])
-    plt.contour(np.flipud(dtm_array[200:-200,200:-200]), extent = ex2a, linewidths = 1.9, colors="red",
+    plt.contour(np.flipud(dtm_array[200:-200, 200:-200]), extent=ex2a, linewidths=1.9, colors="red",
                 levels=list(range(0, 3000, 100)))
 
-    plt.contour(np.flipud(dtm_array[200:-200,200:-200]), extent = ex2a, linewidths = 1.1, colors="red",
+    plt.contour(np.flipud(dtm_array[200:-200, 200:-200]), extent=ex2a, linewidths=1.1, colors="red",
                 levels=list(range(0, 3000, 10)))
 
-    selector = ManualSelect(ax, pts) #, props=dict(color='k', linestyle='-', linewidth=1, alpha=1))
+    selector = ManualSelect(ax, pts)
     print("Select points in the figure by enclosing them within a polygon.")
     print("Press the 'esc' key to start a new polygon.")
     print("Hold the 'shift' key to move all of the vertices.")
@@ -378,7 +357,7 @@ def manual_cutting(pycrown_out, crown_rast_all_in, x, y, *_):
     fig.canvas.mpl_connect("key_press_event", accept)
     ax.set_title("Press enter to accept selected points.")
     plt.xlim([np.min(x), np.max(x)])
-    plt.ylim([np.min(y),np.max(y)])
+    plt.ylim([np.min(y), np.max(y)])
     plt.show()
     selected_pts = selected_pts1
     poly_2cut = poly_2cut1
@@ -468,12 +447,10 @@ def main(cut_trees_method, amount_trees_cut, random_fraction_cut, path_data, buf
 
     top_cor = pycrown_out / "tree_location_top_cor.shp"
     top_cor_all = gpd.GeoDataFrame.from_file(str(top_cor))
-    datasource_tops = driver.Open(str(top_cor), 0)
-    lyr_tops = datasource_tops.GetLayer()
-    ext11=chm_array_metadata2['extent']
+    ext11 = chm_array_metadata2['extent']
     ext_nocrop = ext11[0] + buffer_peri, ext11[0] + buffer_peri, ext11[1] - buffer_peri, ext11[1] - buffer_peri, \
-                 ext11[2] + buffer_peri, ext11[3] - buffer_peri, ext11[3] - buffer_peri, ext11[2] + buffer_peri
-    poly_cut = Polygon((list(zip(ext_nocrop[0:4],ext_nocrop[4:]))))
+        ext11[2] + buffer_peri, ext11[3] - buffer_peri, ext11[3] - buffer_peri, ext11[2] + buffer_peri
+    poly_cut = Polygon((list(zip(ext_nocrop[0:4], ext_nocrop[4:]))))
 
     if forest_mask == 1:
         forest_mask_in = pycrown_out.parents[1] / 'data' / 'Forest_mask_10m.tif'
@@ -488,7 +465,7 @@ def main(cut_trees_method, amount_trees_cut, random_fraction_cut, path_data, buf
         df_coords['coords'] = df_coords['coords'].apply(Point)
 
         no_for = gpd.GeoSeries(df_coords['coords'])
-        no_for_buf=no_for.buffer(10)
+        no_for_buf = no_for.buffer(10)
 
         to_mask_layer23 = top_cor_all["geometry"].apply(lambda x: no_for_buf.contains(x).any())
         to_mask_layer231 = crown_rast_all["geometry"].apply(lambda x: no_for_buf.contains(x.centroid).any())
@@ -498,7 +475,7 @@ def main(cut_trees_method, amount_trees_cut, random_fraction_cut, path_data, buf
         print(np.size(top_cor_all))
         print(np.size(crown_rast_all))
 
-    #cut extra buffer from input data: (needed so we actually only cut out trees in the area we are interested in...
+    # cut extra buffer from input data: (needed so we actually only cut out trees in the area we are interested in...
     crown_rast_all1 = crown_rast_all[crown_rast_all.geometry.centroid.within(poly_cut)]
     top_cor_all1 = top_cor_all[top_cor_all.geometry.within(poly_cut)]
     x = list(top_cor_all1.geometry.apply(lambda p: p.x))
@@ -513,12 +490,17 @@ def main(cut_trees_method, amount_trees_cut, random_fraction_cut, path_data, buf
     elif cut_trees_method == 'auto':
         name_chm = cut_trees_method+"_"+str(amount_trees_cut)+"_fm"+str(forest_mask)+"_buffer"+str(buffer)+"m"
         cutting_method = auto_cutting
+    else:
+        name_chm = None
+        cutting_method = None
 
     fig_comp = pycrown_out / ("comp_chm_" + name_chm + ".png")
-    selected_pts, selected_path = cutting_method(pycrown_out, crown_rast_all1, x, y, top_cor_all1, random_fraction_cut, amount_trees_cut)
+    selected_pts, selected_path = cutting_method(pycrown_out, crown_rast_all1, x, y, top_cor_all1, random_fraction_cut,
+                                                 amount_trees_cut)
 
     print(timeit1.format(time.time() - tt))
-    top_cor_cut, crown_rast_cut = update_chm(selected_pts, pycrown_out, name_chm, cut_trees_method, buffer, forest_mask, selected_path, crown_rast_all1, top_cor_all1)
+    top_cor_cut, crown_rast_cut = update_chm(selected_pts, pycrown_out, name_chm, cut_trees_method, buffer, forest_mask,
+                                             selected_path, crown_rast_all1, top_cor_all1)
 
     print(timeit2.format(time.time() - tt))
     plot_figs(top_cor_cut, crown_rast_all1, crown_rast_cut, x, y, pycrown_out, fig_comp, name_chm)
@@ -534,8 +516,8 @@ def main(cut_trees_method, amount_trees_cut, random_fraction_cut, path_data, buf
 @click.option('--random_fraction_cut', default=None, type=float, help='only needs to be set if random - '
                                                                       'fraction of dataset to be cut [float]')
 @click.option('--path_in', help='input path [str]')
-def cli(cut_trees_method, amount_trees_cut, random_fraction_cut, path_in, buffer, forest_mask):
-    main(cut_trees_method, amount_trees_cut, random_fraction_cut, path_in, buffer, forest_mask)
+def cli(cut_trees_method, amount_trees_cut, random_fraction_cut, path_in, buffer, forest_mask, buffer_peri):
+    main(cut_trees_method, amount_trees_cut, random_fraction_cut, path_in, buffer, forest_mask, buffer_peri)
 
 
 if __name__ == '__main__':
@@ -545,8 +527,8 @@ if __name__ == '__main__':
     else:
         cut_trees_method = 'random'  # options: 'manual' , 'auto', 'random'-
         amount_trees_cut = 3  # if using auto setting - every xth tree to cut
-        random_fraction_cut = 0.1  # if using random setting - which fraction of all trees should be cut?
-        buffer = 0 # if wanting to add buffer around each individual tree crown [depreceated]
+        random_fraction_cut = 0.75  # if using random setting - which fraction of all trees should be cut?
+        buffer = 0  # if wanting to add buffer around each individual tree crown [depreceated]
         buffer_peri = 200  # meters added to perimeter of BDM site (not to be incorporated into this analysis)
         forest_mask = 1  # set to 0 or 1 => select x percent of forest within forest mask only
 
