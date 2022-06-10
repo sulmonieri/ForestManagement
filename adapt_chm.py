@@ -13,12 +13,11 @@ Created on 20.01.22 09:28
 import gdal
 import numpy as np
 import geopandas as gpd
-from matplotlib.widgets import LassoSelector
+from matplotlib.widgets import LassoSelector, PolygonSelector
 from matplotlib.path import Path as Path1
 import matplotlib.pyplot as plt
-from shapely.geometry import Point
+from shapely.geometry import Point, Polygon
 import rasterio
-import fiona
 import pandas as pd
 import rasterio.mask
 from osgeo import ogr
@@ -26,8 +25,15 @@ import random
 import time
 from pathlib import Path
 import click
+import shutil
+import rioxarray
+import os
+import subprocess
+import matplotlib.path as mpltPath
+from scipy.spatial import ConvexHull
+import alphashape as aps
 
-USE_CLI_ARGS = True  # set to True if running from the command line, set to False if running from PyCharm
+USE_CLI_ARGS = False  # set to True if running from the command line, set to False if running from PyCharm
 
 
 class ManualSelect:
@@ -43,25 +49,72 @@ class ManualSelect:
         self.fc = collection.get_facecolors()
         self.fc = np.tile(self.fc, (self.Npts, 1))
 
-        self.lasso = LassoSelector(ax1, onselect=self.onselect)
+        self.poly = PolygonSelector(ax1, self.onselect,
+                                    props = dict(color='g', alpha=1),
+                                    handle_props = dict(mec='g', mfc='g', alpha=1))
+        self.path = None
         self.ind = []
 
     def onselect(self, verts):
         path = Path1(verts)
+        verts_int = verts
         self.ind = np.nonzero(path.contains_points(self.xys))[0]
         self.fc[:, -1] = self.alpha_other
         self.fc[self.ind, -1] = 1
         self.collection.set_facecolors(self.fc)
         self.canvas.draw_idle()
+        self.path = path
 
     def disconnect(self):
-        self.lasso.disconnect_events()
+        self.poly.disconnect_events()
         self.fc[:, -1] = 1
         self.collection.set_facecolors(self.fc)
         self.canvas.draw_idle()
 
 
-def update_chm(sel_pts, pycrown_out):
+def convex_hull(points):
+    """Computes the convex hull of a set of 2D points.
+
+    Input: an iterable sequence of (x, y) pairs representing the points.
+    Output: a list of vertices of the convex hull in counter-clockwise order,
+      starting from the vertex with the lexicographically smallest coordinates.
+    Implements Andrew's monotone chain algorithm. O(n log n) complexity.
+    """
+
+    # Sort the points lexicographically (tuples are compared lexicographically).
+    # Remove duplicates to detect the case we have just one unique point.
+    points = sorted(set(points))
+
+    # Boring case: no points or a single point, possibly repeated multiple times.
+    if len(points) <= 1:
+        return points
+
+    # 2D cross product of OA and OB vectors, i.e. z-component of their 3D cross product.
+    # Returns a positive value, if OAB makes a counter-clockwise turn,
+    # negative for clockwise turn, and zero if the points are collinear.
+    def cross(o, a, b):
+        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+    # Build lower hull
+    lower = []
+    for p in points:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], p) <= 0:
+            lower.pop()
+        lower.append(p)
+
+    # Build upper hull
+    upper = []
+    for p in reversed(points):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], p) <= 0:
+            upper.pop()
+        upper.append(p)
+
+    # Concatenation of the lower and upper hulls gives the convex hull.
+    # Last point of each list is omitted because it is repeated at the beginning of the other list.
+    return lower[:-1] + upper[:-1]
+
+
+def update_chm(sel_pts, pycrown_out, name_chm, cut_trees_method, buffer, forest_mask, poly_2cut, crown_rast_all, top_cor_all):
     """
     Find all crowns + tree tops that need to be eliminated and update/create TIFs accordingly
 
@@ -72,6 +125,12 @@ def update_chm(sel_pts, pycrown_out):
 
     pycrown_out : Path Object
         path to input/output folder
+
+    name_chm : str
+        add on for CHM name
+
+    cut_trees_method : str
+        manual/auto/random?
 
     Returns
     =======
@@ -84,29 +143,40 @@ def update_chm(sel_pts, pycrown_out):
     driver = ogr.GetDriverByName("ESRI Shapefile")
 
     top_cor_new = pycrown_out / "tree_location_top_cor_new.shp"
-    chm_pc_adapt = pycrown_out / "chm_new.tif"
+    chm_pc_adapt = pycrown_out / Path("chm_" + name_chm + ".tif")
     crown_rast_new = pycrown_out / "tree_crown_poly_raster_new.shp"
 
+    # cut CHM based on selected tree crown rasters:
     crown_rast = pycrown_out / "tree_crown_poly_raster.shp"
-    crown_rast_all = gpd.GeoDataFrame.from_file(str(crown_rast))
+    shapefile = gpd.read_file(crown_rast)
 
-    top_cor = pycrown_out / "tree_location_top_cor.shp"
-    top_cor_all = gpd.GeoDataFrame.from_file(str(top_cor))
+    top_cor_all.reset_index(drop=True, inplace=True)
+    crown_rast_all.reset_index(drop=True, inplace=True)
 
-    ids_crown = []
-    ids_top = []
-    for num in range(len(sel_pts)):
-        idc = crown_rast_all.contains(Point(sel_pts[num, :]))
-        idc1 = np.where(idc)[0]
-        if idc1.size != 0:
-            ids_crown.append(idc1[0])
-        id_t = top_cor_all.contains(Point(sel_pts[num, :]))
-        id_t1 = np.where(id_t)[0]
-        ids_top.append(id_t1[0])
+    df_coords = pd.DataFrame({'x': sel_pts[:,0], 'y': sel_pts[:,1]})
+    df_coords['coords'] = list(zip(df_coords['x'], df_coords['y']))
+    df_coords['coords'] = df_coords['coords'].apply(Point)
+    no_for = gpd.GeoSeries(df_coords['coords'])
+    to_mask_layer23 = crown_rast_all["geometry"].apply(lambda x: no_for.within(x).any())
+    to_mask_layer231 = top_cor_all["geometry"].apply(lambda x: no_for.intersects(x).any())
+
+    crown_rast_cut = crown_rast_all.drop(crown_rast_all.index[to_mask_layer23])
+    top_cor_cut = top_cor_all.drop(top_cor_all.index[to_mask_layer231])
+
+   # ids_crown = []
+    #ids_top = []
+    #for num in range(len(sel_pts)):
+   #     idc = crown_rast_all.contains(Point(sel_pts[num, :]))
+    #    idc1 = np.where(idc)[0]
+    #    if idc1.size != 0:
+    #        ids_crown.append(idc1[0])
+    #    id_t = top_cor_all.contains(Point(sel_pts[num, :]))
+    #    id_t1 = np.where(id_t)[0]
+    #    ids_top.append(id_t1[0])
 
     # cut geopandas files to exclude eliminated trees
-    top_cor_cut = top_cor_all.loc[~top_cor_all['DN'].isin(np.array(ids_top))]
-    crown_rast_cut = crown_rast_all.loc[~crown_rast_all['DN'].isin(np.array(ids_crown))]
+    #top_cor_cut = top_cor_all.loc[~top_cor_all['DN'].isin(np.array(ids_top))]
+    #crown_rast_cut = crown_rast_all.loc[~crown_rast_all['DN'].isin(np.array(ids_crown))]
 
     # Remove output shapefiles if they already exist
     if crown_rast_new.exists:
@@ -117,16 +187,24 @@ def update_chm(sel_pts, pycrown_out):
     top_cor_cut.to_file(top_cor_new)
     crown_rast_cut.to_file(crown_rast_new)
 
-    # cut CHM:
-    crown_rast = pycrown_out / "tree_crown_poly_raster.shp"
-    with fiona.open(crown_rast, "r") as shapefile:
-        shapes = [feature["geometry"] for feature in shapefile]
+    # if manual, lay a convex hull around outermost dimension of selected tree crown polygons and cut out everything
+    # within it; if automatic/random, only cut out trees that are above 10m (selected in previous step), and apply a 1m
+    # buffer around each tree top polygon
+    if cut_trees_method == 'manual':
+        a2 = ([[p[0], p[1]] for p in np.array(poly_2cut)[0]])
+        hull_to_cut = pd.Series(Polygon(a2))
+        # hull_to_cut = pd.Series(aps.alphashape(sel_pts, 0.2)) # 0.2 is a toggle param for best concave hull
+        cut_out_chm = hull_to_cut
+    else:
+        #shapefile_cut_10m = shapefile[(shapefile['DN'].isin(ids_crown))]['geometry']
+        to_mask_layer23a = shapefile["geometry"].apply(lambda x: no_for.within(x).any())
+        shapefile_cut_10m = shapefile.drop(shapefile.index[~to_mask_layer23a])
+        shapefile_cut_10m_buffer = shapefile_cut_10m.buffer(buffer)
+        cut_out_chm = pd.Series(shapefile_cut_10m_buffer)
 
-    shapes_series = pd.Series(shapes)
-
-    chm_pc = pycrown_out / "chm.tif"
+    chm_pc = pycrown_out / "CHM_noPycrown.tif"
     with rasterio.open(chm_pc) as src:
-        out_image, out_transform = rasterio.mask.mask(src, shapes_series[ids_crown], crop=False, invert=True)
+        out_image, out_transform = rasterio.mask.mask(src, cut_out_chm, crop=False, invert=True)
         out_meta = src.meta
 
     out_meta.update({"driver": "GTiff",
@@ -151,7 +229,7 @@ def raster2array(geotif_file):
 
     Returns
     =======
-    chm_array : array
+    asp_array : array
         new array of all points in .tif
     chm_array_metadata: string
         all metadata used to convert raster2array
@@ -164,7 +242,7 @@ def raster2array(geotif_file):
     metadata['bands'] = dataset.RasterCount
     metadata['driver'] = dataset.GetDriver().LongName
     metadata['projection'] = dataset.GetProjection()
-    metadata['geotransform'] = dataset.GetGeoTransform()
+    metadata['gt_ch2018'] = dataset.GetGeoTransform()
 
     mapinfo = dataset.GetGeoTransform()
     metadata['pixelWidth'] = mapinfo[1]
@@ -172,8 +250,8 @@ def raster2array(geotif_file):
 
     metadata['ext_dict'] = {}
     metadata['ext_dict']['xMin'] = mapinfo[0]
-    metadata['ext_dict']['xMax'] = mapinfo[0] + dataset.RasterXSize/mapinfo[1]
-    metadata['ext_dict']['yMin'] = mapinfo[3] + dataset.RasterYSize/mapinfo[5]
+    metadata['ext_dict']['xMax'] = mapinfo[0] + dataset.RasterXSize*mapinfo[1]
+    metadata['ext_dict']['yMin'] = mapinfo[3] + dataset.RasterYSize*mapinfo[5]
     metadata['ext_dict']['yMax'] = mapinfo[3]
 
     metadata['extent'] = (metadata['ext_dict']['xMin'], metadata['ext_dict']['xMax'],
@@ -194,7 +272,7 @@ def raster2array(geotif_file):
 
         array = dataset.GetRasterBand(1).ReadAsArray(0, 0, metadata['array_cols'],
                                                      metadata['array_rows']).astype(float)
-        array[array == int(metadata['noDataValue'])] = np.nan
+#        array[array == int(metadata['noDataValue'])] = np.nan
         array = array/metadata['scaleFactor']
         return array, metadata
 
@@ -202,56 +280,95 @@ def raster2array(geotif_file):
         print('More than one band ... need to modify function for case of multiple bands')
 
 
-def plot_figs(top_cor_cut, crown_rast_all, crown_rast_cut, x, y, pycrown_out, fig_comp):
+def plot_figs(top_cor_cut, crown_rast_all, crown_rast_cut, x, y, pycrown_out, fig_comp, name_chm):
 
-    chm_pc_adapt = pycrown_out / "chm_new.tif"
+    chm_pc_adapt = pycrown_out / Path("chm_" + name_chm + ".tif")
     chm_array_new, chm_array_metadata_new = raster2array(str(chm_pc_adapt))
+    chm_array_new[chm_array_new < 1] = np.nan
+    ex1a = chm_array_metadata_new['extent']
+    ex2a = ex1a[0] + 200, ex1a[1] - 200, ex1a[2] + 200, ex1a[3] - 200
 
-    chm_pc = pycrown_out / "chm.tif"
+    chm_pc = pycrown_out / "CHM_noPycrown.tif"
     chm_array, chm_array_metadata = raster2array(str(chm_pc))
+    chm_array[chm_array < 1] = np.nan
+    ex1 = chm_array_metadata['extent']
+    ex2 = ex1[0] + 200, ex1[1] - 200, ex1[2] + 200, ex1[3] - 200
 
-    fig1 = plt.figure(figsize=(13, 4))
+    dtm_pc = pycrown_out / "DTM.tif"
+    dtm_array, dtm_array_metadata = raster2array(str(dtm_pc))
+    ex1a = dtm_array_metadata['extent']
+    ex2b = ex1a[0] + 200, ex1a[1] - 200, ex1a[2] + 200, ex1a[3] - 200
+
+    fig1 = plt.figure(figsize=(14, 6))
     ax_old = fig1.add_subplot(121)
     ax_old.set_title('Original CHM \n #Trees = '+str(len(x)), fontsize=9)
-    plt.imshow(chm_array, extent=chm_array_metadata['extent'], alpha=1)
-    cbar1 = plt.colorbar(fraction=0.046, pad=0.04)
-    cbar1.set_label('Canopy height [m]', rotation=270, labelpad=20)
-    crown_rast_all.plot(ax=ax_old, color='w', alpha=0.6, edgecolor='r', linewidth=0.5)
-    ax_old.scatter(x, y, s=1, marker='x', color='r', linewidth=0.2)
+    plt.imshow(chm_array[200:-200,200:-200], extent=ex2, alpha=1)
+    #cbar1 = plt.colorbar(fraction=0.046, pad=0.04)
+    #cbar1.set_label('Canopy height [m]', rotation=270, labelpad=20)
+    crown_rast_all.plot(ax=ax_old, facecolor='none', alpha=0.7, edgecolor='cyan', linewidth=0.4)
+    plt.contour(np.flipud(dtm_array[200:-200,200:-200]), extent = ex2b, linewidths = 1.3, colors="red",
+                levels=list(range(0, 3000, 100)))
+    plt.contour(np.flipud(dtm_array[200:-200,200:-200]), extent = ex2b, linewidths = 0.7, colors="red",
+                levels=list(range(0, 3000, 10)))
+    #ax_old.scatter(x, y, s=1, marker='x', color='r', linewidth=0.2)
 
     ax_new = fig1.add_subplot(122)
     ax_new.set_title('Modified CHM\n #Trees = '+str(len(top_cor_cut['geometry'].x)), fontsize=9)
-    plt.imshow(chm_array_new, extent=chm_array_metadata_new['extent'], alpha=1)
+    plt.imshow(chm_array_new[200:-200,200:-200], extent=ex2a, alpha=1)
     cbar2 = plt.colorbar(fraction=0.046, pad=0.04)
     cbar2.set_label('Canopy height [m]', rotation=270, labelpad=20)
-    crown_rast_cut.plot(ax=ax_new, color='w', alpha=0.6, edgecolor='r', linewidth=0.4)
-    ax_new.scatter(top_cor_cut['geometry'].x, top_cor_cut['geometry'].y, s=1, marker='x', color='r', linewidth=0.2)
     fig1.savefig(fig_comp, dpi=350, bbox_inches='tight')
     plt.close()
+    # 3) for analysis I also need tif @10m resolution
+    chm_pc_adapt_10m = pycrown_out / Path("chm_" + name_chm + "_10m.tif")
+    if os.path.exists(chm_pc_adapt_10m):
+        os.remove(chm_pc_adapt_10m)
+    # use gdal lib (file can't exist yet!)
+    print("10m res tif ready")
+    args = ['gdalwarp', '-tr', '10.0', '10.0', '-r', 'near', chm_pc_adapt, chm_pc_adapt_10m]
+    subprocess.call(args)
 
 
-def manual_cutting(pycrown_out, crown_rast_all, x, y, *_):
+def manual_cutting(pycrown_out, crown_rast_all_in, x, y, *_):
 
-    chm_pc = pycrown_out / "chm.tif"
+    chm_pc = pycrown_out / "CHM_noPycrown.tif"
     chm_array, chm_array_metadata = raster2array(str(chm_pc))
+    ex1 = chm_array_metadata['extent']
+    ex2 = ex1[0] + 200, ex1[1] - 200, ex1[2] + 200, ex1[3] - 200
+
+    dtm_pc = pycrown_out / "DTM.tif"
+    dtm_array, dtm_array_metadata = raster2array(str(dtm_pc))
+    ex1a = dtm_array_metadata['extent']
+    ex2a = ex1a[0] + 200, ex1a[1] - 200, ex1a[2] + 200, ex1a[3] - 200
 
     fig = plt.figure(figsize=(10, 10))
     ax = fig.add_subplot(111)
-    plt.imshow(chm_array, extent=chm_array_metadata['extent'], alpha=0.6)
+    plt.imshow(chm_array[200:-200,200:-200], extent=ex2, alpha=0.7)
     cbar = plt.colorbar(fraction=0.046, pad=0.04)
     cbar.set_label('Canopy height [m]', rotation=270, labelpad=20)
-    crown_rast_all.plot(ax=ax, color='w', alpha=0.6, edgecolor='r', linewidth=0.4)
-    pts = ax.scatter(x, y, s=5, marker='x', color='r')
+    crown_rast_all_in.plot(ax=ax, facecolor='none', alpha=0.8, edgecolor='cyan', linewidth=0.4)
+    pts = ax.scatter(x, y, s=5, marker='x', color='cyan')
     ax.axis('equal')
     ax.get_xaxis().set_ticks([])
     ax.get_yaxis().set_ticks([])
+    plt.contour(np.flipud(dtm_array[200:-200,200:-200]), extent = ex2a, linewidths = 1.9, colors="red",
+                levels=list(range(0, 3000, 100)))
 
-    selector = ManualSelect(ax, pts)
+    plt.contour(np.flipud(dtm_array[200:-200,200:-200]), extent = ex2a, linewidths = 1.1, colors="red",
+                levels=list(range(0, 3000, 10)))
+
+    selector = ManualSelect(ax, pts) #, props=dict(color='k', linestyle='-', linewidth=1, alpha=1))
+    print("Select points in the figure by enclosing them within a polygon.")
+    print("Press the 'esc' key to start a new polygon.")
+    print("Hold the 'shift' key to move all of the vertices.")
+    print("Hold the 'ctrl' key to move a single vertex.")
 
     def accept(event):
         if event.key == "enter":
-            global selected_pts1
+            global selected_pts1, poly_2cut1
             selected_pts1 = np.array(selector.xys[selector.ind].data)
+            poly_2cut2 = selector.path
+            poly_2cut1 = poly_2cut2.to_polygons(closed_only=True)
             selector.disconnect()
             ax.set_title("")
             fig.canvas.draw()
@@ -260,38 +377,49 @@ def manual_cutting(pycrown_out, crown_rast_all, x, y, *_):
 
     fig.canvas.mpl_connect("key_press_event", accept)
     ax.set_title("Press enter to accept selected points.")
-
+    plt.xlim([np.min(x), np.max(x)])
+    plt.ylim([np.min(y),np.max(y)])
     plt.show()
     selected_pts = selected_pts1
-    return selected_pts
+    poly_2cut = poly_2cut1
+    return selected_pts, poly_2cut
 
 
 def random_cutting(_0, _1, _2, _3, top_cor_all, random_fraction_cut, _4):
-    all_trees = top_cor_all['geometry']
+    all_trees = top_cor_all[top_cor_all['TH'] > 8]['geometry']  # only select trees >10m
+    all_trees.index = np.arange(len(all_trees))
+    all_trees.reset_index()
     x_coords = all_trees.x
     y_coords = all_trees.y
 
-    ids_all = np.array(range(0, len(x_coords) - 1))
+    print(top_cor_all['TH'])
+    print(x_coords)
+    print(np.size(y_coords))
+    print(np.size(top_cor_all))
+
+    ids_all = np.array(range(len(x_coords)))
     num_to_select = int(len(x_coords) * random_fraction_cut)
     list_of_random_items = random.sample(list(ids_all), num_to_select)
+    print(list_of_random_items)
 
     sel_pts_x = x_coords[np.array(list_of_random_items)]
     sel_pts_y = y_coords[np.array(list_of_random_items)]
     selected_pts = np.transpose(np.array([sel_pts_x, sel_pts_y]))
-    return selected_pts
+    return selected_pts, None
 
 
 def auto_cutting(_0, _1, _2, _3, top_cor_all, _4, amount_trees_cut):
-    all_trees = top_cor_all['geometry']
+    all_trees = top_cor_all[top_cor_all['TH'] > 10]['geometry']  # only select trees >10m
+    all_trees.index = np.arange(len(all_trees))
     x_coords = all_trees.x
     y_coords = all_trees.y
     sel_pts_x = x_coords[::amount_trees_cut]
     sel_pts_y = y_coords[::amount_trees_cut]
     selected_pts = np.transpose(np.array([sel_pts_x, sel_pts_y]))
-    return selected_pts
+    return selected_pts, None
 
 
-def main(cut_trees_method, amount_trees_cut, random_fraction_cut, path_data):
+def main(cut_trees_method, amount_trees_cut, random_fraction_cut, path_data, buffer, forest_mask, buffer_peri):
     tt = time.time()
     timeit1 = 'Selected points to cut successfully [{:.3f}s]'
     timeit2 = 'Cut & output CHM/crowns/tops successfully [{:.3f}s]'
@@ -300,38 +428,100 @@ def main(cut_trees_method, amount_trees_cut, random_fraction_cut, path_data):
     driver = ogr.GetDriverByName("ESRI Shapefile")
 
     pycrown_out = Path(path_data)
+
+    orig_chm = pycrown_out.parents[1] / 'data' / 'CHM.tif'
+    shutil.copy(orig_chm, pycrown_out / "CHM_noPycrown.tif")
+
+    chm_array1, chm_array_metadata1 = raster2array(str(pycrown_out / "CHM_noPycrown.tif"))
+    chm_array1[chm_array1 < 1] = np.nan
+
+    fig = plt.figure(figsize=(10, 10))
+    plt.imshow(chm_array1, extent=chm_array_metadata1['extent'], alpha=1.0)
+    cbar = plt.colorbar(fraction=0.046, pad=0.04)
+    cbar.set_label('Canopy height [m]', rotation=270, labelpad=20)
+    fig_comp1 = pycrown_out / "CHM_noPycrown.png"
+    fig.savefig(fig_comp1, dpi=350, bbox_inches='tight')
+    plt.close()
+
+    chm_array2, chm_array_metadata2 = raster2array(str(pycrown_out / "chm.tif"))
+    chm_array2[chm_array2 < 1] = np.nan
+
+    fig = plt.figure(figsize=(10, 10))
+    plt.imshow(chm_array2, extent=chm_array_metadata2['extent'], alpha=1.0)
+    cbar = plt.colorbar(fraction=0.046, pad=0.04)
+    cbar.set_label('Canopy height [m]', rotation=270, labelpad=20)
+    fig_comp1 = pycrown_out / "CHM_Pycrown.png"
+    fig.savefig(fig_comp1, dpi=350, bbox_inches='tight')
+    plt.close()
+
+    fig = plt.figure(figsize=(10, 10))
+    plt.imshow(chm_array2-chm_array1, extent=chm_array_metadata2['extent'], alpha=1.0)
+    plt.clim(np.min(chm_array2-chm_array1), np.max(chm_array2-chm_array1))
+    cbar = plt.colorbar(fraction=0.046, pad=0.04)
+    cbar.set_label('Canopy height [m]', rotation=270, labelpad=20)
+    fig_comp1 = pycrown_out / "CHM_Pycrown_diff.png"
+    fig.savefig(fig_comp1, dpi=350, bbox_inches='tight')
+    plt.close()
+
     crown_rast = pycrown_out / "tree_crown_poly_raster.shp"
     crown_rast_all = gpd.GeoDataFrame.from_file(str(crown_rast))
-
-    if cut_trees_method == 'manual':
-        fig_comp = pycrown_out / ("comp_chm_"+cut_trees_method+".png")
-        cutting_method = manual_cutting
-    elif cut_trees_method == 'random':
-        fig_comp = pycrown_out / ("comp_chm_"+cut_trees_method+"_"+str(random_fraction_cut)+".png")
-        cutting_method = random_cutting
-    elif cut_trees_method == 'auto':
-        fig_comp = pycrown_out / ("comp_chm_"+cut_trees_method+"_"+str(amount_trees_cut)+".png")
-        cutting_method = auto_cutting
 
     top_cor = pycrown_out / "tree_location_top_cor.shp"
     top_cor_all = gpd.GeoDataFrame.from_file(str(top_cor))
     datasource_tops = driver.Open(str(top_cor), 0)
     lyr_tops = datasource_tops.GetLayer()
+    ext11=chm_array_metadata2['extent']
+    ext_nocrop = ext11[0] + buffer_peri, ext11[0] + buffer_peri, ext11[1] - buffer_peri, ext11[1] - buffer_peri, \
+                 ext11[2] + buffer_peri, ext11[3] - buffer_peri, ext11[3] - buffer_peri, ext11[2] + buffer_peri
+    poly_cut = Polygon((list(zip(ext_nocrop[0:4],ext_nocrop[4:]))))
 
-    x = []
-    y = []
-    for row in lyr_tops:
-        geom = row.geometry()
-        x.append(geom.GetX())
-        y.append(geom.GetY())
+    if forest_mask == 1:
+        forest_mask_in = pycrown_out.parents[1] / 'data' / 'Forest_mask_10m.tif'
+        xds_fm = rioxarray.open_rasterio(forest_mask_in)
+        a45 = np.where(xds_fm.values == 128, np.nan, xds_fm.values)
+        xds_fm.values = a45
+        fm_df = xds_fm.to_dataframe(name="mask_value").reset_index()
+        to_mask = fm_df[np.isnan(fm_df['mask_value'])]
 
-    selected_pts = cutting_method(pycrown_out, crown_rast_all, x, y, top_cor_all, random_fraction_cut, amount_trees_cut)
+        df_coords = pd.DataFrame({'x': to_mask['x'], 'y': to_mask['y']})
+        df_coords['coords'] = list(zip(to_mask['x'], to_mask['y']))
+        df_coords['coords'] = df_coords['coords'].apply(Point)
+
+        no_for = gpd.GeoSeries(df_coords['coords'])
+        no_for_buf=no_for.buffer(10)
+
+        to_mask_layer23 = top_cor_all["geometry"].apply(lambda x: no_for_buf.contains(x).any())
+        to_mask_layer231 = crown_rast_all["geometry"].apply(lambda x: no_for_buf.contains(x.centroid).any())
+
+        crown_rast_all.drop(crown_rast_all.index[to_mask_layer231], inplace=True)
+        top_cor_all.drop(top_cor_all.index[to_mask_layer23], inplace=True)
+        print(np.size(top_cor_all))
+        print(np.size(crown_rast_all))
+
+    #cut extra buffer from input data: (needed so we actually only cut out trees in the area we are interested in...
+    crown_rast_all1 = crown_rast_all[crown_rast_all.geometry.centroid.within(poly_cut)]
+    top_cor_all1 = top_cor_all[top_cor_all.geometry.within(poly_cut)]
+    x = list(top_cor_all1.geometry.apply(lambda p: p.x))
+    y = list(top_cor_all1.geometry.apply(lambda p: p.y))
+
+    if cut_trees_method == 'manual':
+        name_chm = cut_trees_method+"_fm"+str(forest_mask)
+        cutting_method = manual_cutting
+    elif cut_trees_method == 'random':
+        name_chm = cut_trees_method+"_"+str(random_fraction_cut)+"_fm"+str(forest_mask)+"_buffer"+str(buffer)+"m"
+        cutting_method = random_cutting
+    elif cut_trees_method == 'auto':
+        name_chm = cut_trees_method+"_"+str(amount_trees_cut)+"_fm"+str(forest_mask)+"_buffer"+str(buffer)+"m"
+        cutting_method = auto_cutting
+
+    fig_comp = pycrown_out / ("comp_chm_" + name_chm + ".png")
+    selected_pts, selected_path = cutting_method(pycrown_out, crown_rast_all1, x, y, top_cor_all1, random_fraction_cut, amount_trees_cut)
 
     print(timeit1.format(time.time() - tt))
-    top_cor_cut, crown_rast_cut = update_chm(selected_pts, pycrown_out)
+    top_cor_cut, crown_rast_cut = update_chm(selected_pts, pycrown_out, name_chm, cut_trees_method, buffer, forest_mask, selected_path, crown_rast_all1, top_cor_all1)
 
     print(timeit2.format(time.time() - tt))
-    plot_figs(top_cor_cut, crown_rast_all, crown_rast_cut, x, y, pycrown_out, fig_comp)
+    plot_figs(top_cor_cut, crown_rast_all1, crown_rast_cut, x, y, pycrown_out, fig_comp, name_chm)
 
     print(timeit3.format(time.time() - tt))
     return None
@@ -344,8 +534,8 @@ def main(cut_trees_method, amount_trees_cut, random_fraction_cut, path_data):
 @click.option('--random_fraction_cut', default=None, type=float, help='only needs to be set if random - '
                                                                       'fraction of dataset to be cut [float]')
 @click.option('--path_in', help='input path [str]')
-def cli(cut_trees_method, amount_trees_cut, random_fraction_cut, path_in):
-    main(cut_trees_method, amount_trees_cut, random_fraction_cut, path_in)
+def cli(cut_trees_method, amount_trees_cut, random_fraction_cut, path_in, buffer, forest_mask):
+    main(cut_trees_method, amount_trees_cut, random_fraction_cut, path_in, buffer, forest_mask)
 
 
 if __name__ == '__main__':
@@ -354,9 +544,12 @@ if __name__ == '__main__':
         cli()
     else:
         cut_trees_method = 'random'  # options: 'manual' , 'auto', 'random'-
-        amount_trees_cut = 2  # if using auto setting - every xth tree to cut
-        random_fraction_cut = 0.2  # if using random setting - which fraction of all trees should be cut?
+        amount_trees_cut = 3  # if using auto setting - every xth tree to cut
+        random_fraction_cut = 0.1  # if using random setting - which fraction of all trees should be cut?
+        buffer = 0 # if wanting to add buffer around each individual tree crown [depreceated]
+        buffer_peri = 200  # meters added to perimeter of BDM site (not to be incorporated into this analysis)
+        forest_mask = 1  # set to 0 or 1 => select x percent of forest within forest mask only
 
-        path_in = '/home/malle/pycrown/experiment_sites/BD1/result/dalponteCIRC_numba_10Mrad_ws4_chm4'
-
-        main(cut_trees_method, amount_trees_cut, random_fraction_cut, path_in)
+        path_in = '/home/malle/pycrown/experiment_sites_select/BDM_2/result/' \
+                  'dalponteCIRC_numba_12mrad_ws3_chm3_thseed01_thcrown01/'
+        main(cut_trees_method, amount_trees_cut, random_fraction_cut, path_in, buffer, forest_mask, buffer_peri)
