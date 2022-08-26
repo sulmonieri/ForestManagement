@@ -18,7 +18,7 @@ if __name__ == '__main__':
     F_DSM = '/home/malle/pycrown/experiment_sites/laret_test/data/DSM.tif'
     F_LAS = ''
 
-    PC = PyCrown(F_CHM, F_DTM, F_DSM, outpath='/home/malle/pycrown/experiment_sites/laret_test/result')
+    PC = PyCrown(F_CHM, F_DTM, F_DSM, outpath='/home/malle/pycrown/experiment_sites/laret_test/lme_tmax')
 
     # Cut off edges
     # PC.clip_data_to_bbox((1802200, 1802400, 5467250, 5467450))

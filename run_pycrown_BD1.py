@@ -21,7 +21,7 @@ if __name__ == '__main__':
     F_DSM = '/home/malle/pycrown/experiment_sites_select/'+site+'/data/DSM.tif'
     F_LAS = ''
 
-    PC = PyCrown(F_CHM, F_DTM, F_DSM, outpath='/home/malle/pycrown/experiment_sites_select/BDM_3/result/dalponteCIRC_numba_12mrad_ws3_chm3_thseed01_thcrown01')
+    PC = PyCrown(F_CHM, F_DTM, F_DSM, outpath='/home/malle/pycrown/experiment_sites_select/BDM_3/lme_tmax/dalponteCIRC_numba_12mrad_ws3_chm3_thseed01_thcrown01')
 
     # Cut off edges
     # PC.clip_data_to_bbox((1802200, 1802400, 5467250, 5467450))
