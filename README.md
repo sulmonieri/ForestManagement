@@ -1,4 +1,4 @@
-# SetUp_sites
+# ForestManagement
 Set of scripts needed to prep for radiative transfer modelling at biodiversity sites in Switzerland. 
 
 Use raster_prep.py to cut national CHM/DTM and create DSM for spatial extent of interest
