@@ -99,13 +99,13 @@ def update_chm(sel_pts, pycrown_out, name_chm, cut_trees_method1, buffer, forest
 
     driver = ogr.GetDriverByName("ESRI Shapefile")
 
-    top_cor_new = pycrown_out / "tree_location_top_cor_new.shp"
-    chm_pc_adapt = pycrown_out / Path("chm_" + name_chm + ".tif")
-    crown_rast_new = pycrown_out / "tree_crown_poly_raster_new.shp"
+    top_cor_new = pycrown_out / "tree_location_top_cor_new.shp" ## location of adapted tree top location shapefile
+    chm_pc_adapt = pycrown_out / Path("chm_" + name_chm + ".tif") ## location of adapted chm
+    crown_rast_new = pycrown_out / "tree_crown_poly_raster_new.shp" ## location of adapted tree polygon shapefiile
 
     # cut CHM based on selected tree crown rasters:
-    crown_rast = pycrown_out / "tree_crown_poly_raster.shp"
-    shapefile = gpd.read_file(crown_rast)
+    crown_rast = pycrown_out / "tree_crown_poly_raster.shp" ## location of original tree polygon shapefile
+    shapefile = gpd.read_file(crown_rast) ## read shapefile
 
     top_cor_all.reset_index(drop=True, inplace=True)
     crown_rast_all.reset_index(drop=True, inplace=True)
@@ -219,7 +219,7 @@ def raster2array(geotif_file):
     elif metadata['bands'] > 1:
         print('More than one band ... need to modify function for case of multiple bands')
 
-
+###### function for plotting of output #######
 def plot_figs(top_cor_cut, crown_rast_all, crown_rast_cut, x, y, pycrown_out, fig_comp, name_chm):
 
     chm_pc_adapt = pycrown_out / Path("chm_" + name_chm + ".tif")
@@ -266,7 +266,7 @@ def plot_figs(top_cor_cut, crown_rast_all, crown_rast_cut, x, y, pycrown_out, fi
     args = ['gdalwarp', '-tr', '10.0', '10.0', '-r', 'near', chm_pc_adapt, chm_pc_adapt_10m]
     subprocess.call(args)
 
-
+###### function for manual tree cutting (windthrow, clear cut) #######
 def manual_cutting(pycrown_out, crown_rast_all_in, x, y, *_):
 
     chm_pc = pycrown_out / "CHM_noPycrown.tif"
@@ -322,7 +322,7 @@ def manual_cutting(pycrown_out, crown_rast_all_in, x, y, *_):
     poly_2cut = poly_2cut1
     return selected_pts, poly_2cut
 
-
+#### random removal of a specified percentage of trees ####
 def random_cutting(_0, _1, _2, _3, top_cor_all, random_fraction_cut, _4):
     all_trees = top_cor_all[top_cor_all['TH'] > 8]['geometry']  # only select trees >10m
     all_trees.index = np.arange(len(all_trees))
