@@ -10,7 +10,7 @@ Created on 20.01.22 09:28
 @author: malle
 """
 
-import gdal
+from osgeo import gdal
 import numpy as np
 import geopandas as gpd
 from matplotlib.widgets import PolygonSelector
