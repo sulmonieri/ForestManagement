@@ -192,7 +192,7 @@ def raster2array(geotif_file):
     if metadata['bands'] == 1:
         raster = dataset.GetRasterBand(1)
         metadata['noDataValue'] = raster.GetNoDataValue()
-        metadata['scaleFactor'] = raster.GetScale()
+#        metadata['scaleFactor'] = raster.GetScale()
 
         # band statistics
         metadata['bandstats'] = {}  # make a nested dictionary to store band stats in same
@@ -205,7 +205,7 @@ def raster2array(geotif_file):
         array = dataset.GetRasterBand(1).ReadAsArray(0, 0, metadata['array_cols'],
                                                      metadata['array_rows']).astype(float)
 #        array[array == int(metadata['noDataValue'])] = np.nan
-        array = array/metadata['scaleFactor']
+#        array = array/metadata['scaleFactor']
         return array, metadata
 
     elif metadata['bands'] > 1:
