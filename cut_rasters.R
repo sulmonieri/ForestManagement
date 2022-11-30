@@ -37,8 +37,8 @@ fmask_crop <- crop(fmask,shp,overwrite=TRUE,filename='aoi/adapt_chm/fmask_aoi.ti
 
 
 ## DTM needs to be disaggregated to 1m (VHM resolution)
-dtm_crop <- disagg(crop(dtm,shp),5,method='bilinear',filename='aoi/adapt_chm/DTM_1m_aoi.tif',gdal=c('COMPRESS=DEFLATE','PREDICTOR=3'),overwrite=TRUE)
-vhm_crop <- crop(vhm,shp,filename='aoi/adapt_chm/VHM_aoi.tif',gdal=c('COMPRESS=DEFLATE','PREDICTOR=3'), overwrite=TRUE)
+dtm_crop <- disagg(crop(dtm,shp),5,method='bilinear',filename='aoi/adapt_chm/DTM_aoi.tif',gdal=c('COMPRESS=DEFLATE','PREDICTOR=3'),overwrite=TRUE)
+vhm_crop <- crop(vhm,shp,filename='aoi/adapt_chm/CHM_aoi.tif',gdal=c('COMPRESS=DEFLATE','PREDICTOR=3'), overwrite=TRUE)
 
 ## generate digital surface model
 dsm <- vhm_crop+dtm_crop
