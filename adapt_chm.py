@@ -1,3 +1,301 @@
+# -*- coding: utf-8 -*-
+"""
+Desc: Script to manipulate shapefiles (canopy height models) for land use change experiments
+3 Options implemented to remove trees: 'manual' , 'auto', 'random'
+'manual' allows user to select area of interest to remove all trees within selected perimeter (e.g. wind-throw events)
+'auto' allows user to specify a number, based on which every xth tree will be removed
+'random ' allows user to specify fraction of forest which will be randomly removed
+Created on 20.01.22 09:28
+@author: malle
+"""
+
+from osgeo import gdal
+import numpy as np
+import geopandas as gpd
+from matplotlib.widgets import PolygonSelector
+from matplotlib.path import Path as Path1
+import matplotlib.pyplot as plt
+from shapely.geometry import Point, Polygon
+import rasterio
+import pandas as pd
+import rasterio.mask
+from osgeo import ogr
+import random
+import time
+from pathlib import Path
+import click
+import shutil
+import rioxarray
+import os
+import subprocess
+
+
+USE_CLI_ARGS = True  # set to True if running from the command line, set to False if running from PyCharm
+
+
+class ManualSelect:
+
+    def __init__(self, ax1, collection, alpha_other=0.1):
+        self.canvas = ax1.figure.canvas
+        self.collection = collection
+        self.alpha_other = alpha_other
+
+        self.xys = collection.get_offsets()
+        self.Npts = len(self.xys)
+
+        self.fc = collection.get_facecolors()
+        self.fc = np.tile(self.fc, (self.Npts, 1))
+
+        self.poly = PolygonSelector(ax1, self.onselect,
+                                    props=dict(color='g', alpha=1),
+                                    handle_props=dict(mec='g', mfc='g', alpha=1))
+        self.path = None
+        self.ind = []
+
+    def onselect(self, verts):
+        path = Path1(verts)
+        self.ind = np.nonzero(path.contains_points(self.xys))[0]
+        self.fc[:, -1] = self.alpha_other
+        self.fc[self.ind, -1] = 1
+        self.collection.set_facecolors(self.fc)
+        self.canvas.draw_idle()
+        self.path = path
+
+    def disconnect(self):
+        self.poly.disconnect_events()
+        self.fc[:, -1] = 1
+        self.collection.set_facecolors(self.fc)
+        self.canvas.draw_idle()
+
+
+
+def update_chm(sel_pts, pycrown_out, name_chm, cut_trees_method1, buffer, forest_mask, poly_2cut, crown_rast_all,
+               top_cor_all):
+    """
+    Find all crowns + tree tops that need to be eliminated and update/create TIFs accordingly
+    Parameters
+    ==========
+    sel_pts : np.array
+        selected points to cut from canopy height model
+    pycrown_out : Path Object
+        path to input/output folder
+    name_chm : str
+        add on for CHM name
+    cut_trees_method1 : str
+        manual/auto/random?
+    Returns
+    =======
+    top_cor_cut : np.array
+        new array of all points of top of the canopy
+    crown_rast_cut: np.array
+        new array of all crown polygons
+    """
+
+    driver = ogr.GetDriverByName("ESRI Shapefile")
+
+    top_cor_new = pycrown_out / "tree_location_top_cor_new.shp" ## location of adapted tree top location shapefile
+    chm_pc_adapt = pycrown_out / Path("chm_" + name_chm + ".tif") ## location of adapted chm
+    crown_rast_new = pycrown_out / "tree_crown_poly_raster_new.shp" ## location of adapted tree polygon shapefiile
+
+    # cut CHM based on selected tree crown rasters:
+    crown_rast = pycrown_out / "tree_crown_poly_raster.shp" ## location of original tree polygon shapefile
+    shapefile = gpd.read_file(crown_rast) ## read shapefile
+
+    top_cor_all.reset_index(drop=True, inplace=True)
+    crown_rast_all.reset_index(drop=True, inplace=True)
+
+    df_coords = pd.DataFrame({'x': sel_pts[:, 0], 'y': sel_pts[:, 1]})
+    df_coords['coords'] = list(zip(df_coords['x'], df_coords['y']))
+    df_coords['coords'] = df_coords['coords'].apply(Point)
+    no_for = gpd.GeoSeries(df_coords['coords'])
+    to_mask_layer23 = crown_rast_all["geometry"].apply(lambda x: no_for.within(x).any())
+    to_mask_layer231 = top_cor_all["geometry"].apply(lambda x: no_for.intersects(x).any())
+
+    crown_rast_cut = crown_rast_all.drop(crown_rast_all.index[to_mask_layer23])
+    top_cor_cut = top_cor_all.drop(top_cor_all.index[to_mask_layer231])
+
+    # Remove output shapefiles if they already exist
+    if crown_rast_new.exists:
+        driver.DeleteDataSource(str(crown_rast_new))
+    if top_cor_new.exists:
+        driver.DeleteDataSource(str(top_cor_new))
+    # Write new shapefiles:
+    top_cor_cut.to_file(top_cor_new)
+    crown_rast_cut.to_file(crown_rast_new)
+
+    # if manual, lay a convex hull around outermost dimension of selected tree crown polygons and cut out everything
+    # within it; if automatic/random, only cut out trees that are above 10m (selected in previous step), and apply a 1m
+    # buffer around each tree top polygon
+    if cut_trees_method1 == 'manual':
+        a2 = ([[p[0], p[1]] for p in np.array(poly_2cut)[0]])
+        hull_to_cut = pd.Series(Polygon(a2))
+        cut_out_chm = hull_to_cut
+    else:
+        to_mask_layer23a = shapefile["geometry"].apply(lambda x: no_for.within(x).any())
+        shapefile_cut_10m = shapefile.drop(shapefile.index[~to_mask_layer23a])
+        shapefile_cut_10m_buffer = shapefile_cut_10m.buffer(buffer)
+        cut_out_chm = pd.Series(shapefile_cut_10m_buffer)
+
+    chm_pc = pycrown_out / "CHM_noPycrown.tif"
+    with rasterio.open(chm_pc) as src:
+        out_image, out_transform = rasterio.mask.mask(src, cut_out_chm, crop=False, invert=True)
+        out_meta = src.meta
+
+    out_meta.update({"driver": "GTiff",
+                     "height": out_image.shape[1],
+                     "width": out_image.shape[2],
+                     "transform": out_transform})
+
+    with rasterio.open(chm_pc_adapt, "w", **out_meta) as dest:
+        dest.write(out_image)
+
+    return top_cor_cut, crown_rast_cut
+
+
+def raster2array(geotif_file):
+    """
+    Convert raster to array
+    Parameters
+    ==========
+    geotif_file : path to .tif
+        geotif of CHM
+    Returns
+    =======
+    asp_array : array
+        new array of all points in .tif
+    chm_array_metadata: string
+        all metadata used to convert raster2array
+    """
+
+    metadata = {}
+    dataset = gdal.Open(geotif_file)
+    metadata['array_rows'] = dataset.RasterYSize
+    metadata['array_cols'] = dataset.RasterXSize
+    metadata['bands'] = dataset.RasterCount
+    metadata['driver'] = dataset.GetDriver().LongName
+    metadata['projection'] = dataset.GetProjection()
+    metadata['gt_ch2018'] = dataset.GetGeoTransform()
+
+    mapinfo = dataset.GetGeoTransform()
+    metadata['pixelWidth'] = mapinfo[1]
+    metadata['pixelHeight'] = mapinfo[5]
+
+    metadata['ext_dict'] = {}
+    metadata['ext_dict']['xMin'] = mapinfo[0]
+    metadata['ext_dict']['xMax'] = mapinfo[0] + dataset.RasterXSize*mapinfo[1]
+    metadata['ext_dict']['yMin'] = mapinfo[3] + dataset.RasterYSize*mapinfo[5]
+    metadata['ext_dict']['yMax'] = mapinfo[3]
+
+    metadata['extent'] = (metadata['ext_dict']['xMin'], metadata['ext_dict']['xMax'],
+                          metadata['ext_dict']['yMin'], metadata['ext_dict']['yMax'])
+
+    if metadata['bands'] == 1:
+        raster = dataset.GetRasterBand(1)
+        metadata['noDataValue'] = raster.GetNoDataValue()
+        metadata['scaleFactor'] = raster.GetScale()
+
+        # band statistics
+        metadata['bandstats'] = {}  # make a nested dictionary to store band stats in same
+        stats = raster.GetStatistics(True, True)
+        metadata['bandstats']['min'] = round(stats[0], 2)
+        metadata['bandstats']['max'] = round(stats[1], 2)
+        metadata['bandstats']['mean'] = round(stats[2], 2)
+        metadata['bandstats']['stdev'] = round(stats[3], 2)
+
+        array = dataset.GetRasterBand(1).ReadAsArray(0, 0, metadata['array_cols'],
+                                                     metadata['array_rows']).astype(float)
+#        array[array == int(metadata['noDataValue'])] = np.nan
+#        array = array/metadata['scaleFactor']
+        return array, metadata
+
+    elif metadata['bands'] > 1:
+        print('More than one band ... need to modify function for case of multiple bands')
+
+###### function for plotting of output #######
+def plot_figs(top_cor_cut, crown_rast_all, crown_rast_cut, x, y, pycrown_out, fig_comp, name_chm):
+
+    chm_pc_adapt = pycrown_out / Path("chm_" + name_chm + ".tif")
+    chm_array_new, chm_array_metadata_new = raster2array(str(chm_pc_adapt))
+    chm_array_new[chm_array_new < 1] = np.nan
+    ex1a = chm_array_metadata_new['extent']
+    ex2a = ex1a[0] + 200, ex1a[1] - 200, ex1a[2] + 200, ex1a[3] - 200
+
+    chm_pc = pycrown_out / "CHM_noPycrown.tif"
+    chm_array, chm_array_metadata = raster2array(str(chm_pc))
+    chm_array[chm_array < 1] = np.nan
+    ex1 = chm_array_metadata['extent']
+    ex2 = ex1[0] + 200, ex1[1] - 200, ex1[2] + 200, ex1[3] - 200
+
+    dtm_pc = pycrown_out / "DTM.tif"
+    dtm_array, dtm_array_metadata = raster2array(str(dtm_pc))
+    ex1a = dtm_array_metadata['extent']
+    ex2b = ex1a[0] + 200, ex1a[1] - 200, ex1a[2] + 200, ex1a[3] - 200
+
+    fig1 = plt.figure(figsize=(14, 6))
+    ax_old = fig1.add_subplot(121)
+    ax_old.set_title('Original CHM \n #Trees = '+str(len(x)), fontsize=9)
+    plt.imshow(chm_array[200:-200, 200:-200], extent=ex2, alpha=1)
+    crown_rast_all.plot(ax=ax_old, facecolor='none', alpha=0.7, edgecolor='cyan', linewidth=0.4)
+    plt.contour(np.flipud(dtm_array[200:-200, 200:-200]), extent=ex2b, linewidths=1.3, colors="red",
+                levels=list(range(0, 3000, 100)))
+    plt.contour(np.flipud(dtm_array[200:-200, 200:-200]), extent=ex2b, linewidths=0.7, colors="red",
+                levels=list(range(0, 3000, 10)))
+    # ax_old.scatter(x, y, s=1, marker='x', color='r', linewidth=0.2)
+
+    ax_new = fig1.add_subplot(122)
+    ax_new.set_title('Modified CHM\n #Trees = '+str(len(top_cor_cut['geometry'].x)), fontsize=9)
+    plt.imshow(chm_array_new[200:-200, 200:-200], extent=ex2a, alpha=1)
+    cbar2 = plt.colorbar(fraction=0.046, pad=0.04)
+    cbar2.set_label('Canopy height [m]', rotation=270, labelpad=20)
+    fig1.savefig(fig_comp, dpi=350, bbox_inches='tight')
+    plt.close()
+    # 3) for analysis I also need tif @10m resolution
+    chm_pc_adapt_10m = pycrown_out / Path("chm_" + name_chm + "_10m.tif")
+    if os.path.exists(chm_pc_adapt_10m):
+        os.remove(chm_pc_adapt_10m)
+    # use gdal lib (file can't exist yet!)
+    print("10m res tif ready")
+    args = ['gdalwarp', '-tr', '10.0', '10.0', '-r', 'near', chm_pc_adapt, chm_pc_adapt_10m]
+    subprocess.call(args)
+
+###### function for manual tree cutting (windthrow, clear cut) #######
+def manual_cutting(pycrown_out, crown_rast_all_in, x, y, *_):
+
+    chm_pc = pycrown_out / "CHM_noPycrown.tif"
+    chm_array, chm_array_metadata = raster2array(str(chm_pc))
+    ex1 = chm_array_metadata['extent']
+    ex2 = ex1[0] + 200, ex1[1] - 200, ex1[2] + 200, ex1[3] - 200
+
+    dtm_pc = pycrown_out / "DTM.tif"
+    dtm_array, dtm_array_metadata = raster2array(str(dtm_pc))
+    ex1a = dtm_array_metadata['extent']
+    ex2a = ex1a[0] + 200, ex1a[1] - 200, ex1a[2] + 200, ex1a[3] - 200
+
+    fig = plt.figure(figsize=(10, 10))
+    ax = fig.add_subplot(111)
+    plt.imshow(chm_array[200:-200, 200:-200], extent=ex2, alpha=0.7)
+    cbar = plt.colorbar(fraction=0.046, pad=0.04)
+    cbar.set_label('Canopy height [m]', rotation=270, labelpad=20)
+    crown_rast_all_in.plot(ax=ax, facecolor='none', alpha=0.8, edgecolor='cyan', linewidth=0.4)
+    pts = ax.scatter(x, y, s=5, marker='x', color='cyan')
+    ax.axis('equal')
+    ax.get_xaxis().set_ticks([])
+    ax.get_yaxis().set_ticks([])
+    plt.contour(np.flipud(dtm_array[200:-200, 200:-200]), extent=ex2a, linewidths=1.9, colors="red",
+                levels=list(range(0, 3000, 100)))
+
+    plt.contour(np.flipud(dtm_array[200:-200, 200:-200]), extent=ex2a, linewidths=1.1, colors="red",
+                levels=list(range(0, 3000, 10)))
+
+    selector = ManualSelect(ax, pts)
+    print("Select points in the figure by enclosing them within a polygon.")
+    print("Press the 'esc' key to start a new polygon.")
+    print("Hold the 'shift' key to move all of the vertices.")
+    print("Hold the 'ctrl' key to move a single vertex.")
+
+    def accept(event):
+        if event.key == "enter":
+            global selected_pts1, poly_2cut1
             selected_pts1 = np.array(selector.xys[selector.ind].data)
             poly_2cut2 = selector.path
             poly_2cut1 = poly_2cut2.to_polygons(closed_only=True)
