@@ -11,9 +11,9 @@ library(terra)
 setwd('ForestManagement')
 
 ## read nationwide rasters
-vhm <- rast('nationwide/adapt_chm/VHM.tif')
-dtm <- rast('nationwide/adapt_chm/DTM_5m.tif')
-fmask <- rast('nationwide/adapt_chm/ForestMask_10m.tif')
+vhm <- rast('nationwide/VHM.tif')
+dtm <- rast('nationwide/DTM_5m.tif')
+fmask <- rast('nationwide/ForestMask_10m.tif')
 temp <- rast('nationwide/temperature.tif')
 rain <- rast('nationwide/rain.tif')
 twi <- rast('nationwide/TWI.tif')
