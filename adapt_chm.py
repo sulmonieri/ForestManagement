@@ -491,6 +491,5 @@ if __name__ == '__main__':
         buffer_peri = 200  # meters added to perimeter of BDM site (not to be incorporated into this analysis, but for transmissivity calculations)
         forest_mask = 1  # set to 0 or 1 => select x percent of forest within forest mask only [default: 1]
 
-        path_in = '/home/vagrant/ForestManagement/aoi/adapt_chm/results/' \
-                  'dalponteCIRC_numba_12mrad_ws3_chm3_thseed01_thcrown01/'  # path to pycrown output
+        path_in = '/home/vagrant/ForestManagement/aoi/adapt_chm/results/' # path to pycrown output
         main(cut_trees_method, amount_trees_cut, random_fraction_cut, path_in, buffer, forest_mask, buffer_peri)
