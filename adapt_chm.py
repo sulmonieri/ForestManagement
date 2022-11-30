@@ -350,6 +350,7 @@ def auto_cutting(_0, _1, _2, _3, top_cor_all, _4, amount_trees_cut):
 
 
 def main(cut_trees_method, amount_trees_cut, random_fraction_cut, path_data, buffer, forest_mask, buffer_peri):
+    buffer_peri = np.int32(buffer_peri)
     tt = time.time()
     timeit1 = 'Selected points to cut successfully [{:.3f}s]'
     timeit2 = 'Cut & output CHM/crowns/tops successfully [{:.3f}s]'
