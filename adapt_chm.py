@@ -477,7 +477,7 @@ def main(cut_trees_method, amount_trees_cut, random_fraction_cut, path_data, buf
 
 @click.option('--buffer_peri', type=float, help='buffer in meters to perimeter of aoi [float]')
 
-@click.option('--forest_mask', help='auto or random or manual [int]')
+@click.option('--forest_mask', help='use forest mask [1] or not [0] [int]')
 
 def cli(cut_trees_method, amount_trees_cut, random_fraction_cut, path_in, buffer, forest_mask, buffer_peri):
     main(cut_trees_method, amount_trees_cut, random_fraction_cut, path_in, buffer, forest_mask, buffer_peri)
