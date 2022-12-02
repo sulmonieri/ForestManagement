@@ -13,9 +13,9 @@ if __name__ == '__main__':
 
     TSTART = datetime.now()
 
-    F_CHM = '/home/vagrant/ForestManagement/aoi/adapt_chm/CHM_aoi.tif'
-    F_DTM = '/home/vagrant/ForestManagement/aoi/adapt_chm/DTM_aoi.tif'
-    F_DSM = '/home/vagrant/ForestManagement/aoi/adapt_chm/DSM_aoi.tif'
+    F_CHM = '/home/vagrant/ForestManagement/aoi/adapt_chm/CHM.tif'
+    F_DTM = '/home/vagrant/ForestManagement/aoi/adapt_chm/DTM.tif'
+    F_DSM = '/home/vagrant/ForestManagement/aoi/adapt_chm/DSM.tif'
     F_LAS = ''
 
     PC = PyCrown(F_CHM, F_DTM, F_DSM, outpath='/home/vagrant/ForestManagement/aoi/adapt_chm/results/')
