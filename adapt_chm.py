@@ -115,9 +115,9 @@ def update_chm(sel_pts, pycrown_out, name_chm, cut_trees_method1, buffer, forest
     top_cor_cut = top_cor_all.drop(top_cor_all.index[to_mask_layer231])
 
     # Remove output shapefiles if they already exist
-    if crown_rast_new.is_file:
+    if crown_rast_new.is_file():
         driver.DeleteDataSource(str(crown_rast_new))
-    if top_cor_new.is_file:
+    if top_cor_new.is_file():
         driver.DeleteDataSource(str(top_cor_new))
     # Write new shapefiles:
     top_cor_cut.to_file(top_cor_new)
@@ -226,7 +226,7 @@ def plot_figs(top_cor_cut, crown_rast_all, crown_rast_cut, x, y, pycrown_out, fi
     ex1 = chm_array_metadata['extent']
     ex2 = ex1[0] + 200, ex1[1] - 200, ex1[2] + 200, ex1[3] - 200
 
-    dtm_pc = pycrown_out / "DTM.tif"
+    dtm_pc = pycrown_out.parents[0] / "DTM.tif"
     dtm_array, dtm_array_metadata = raster2array(str(dtm_pc))
     ex1a = dtm_array_metadata['extent']
     ex2b = ex1a[0] + 200, ex1a[1] - 200, ex1a[2] + 200, ex1a[3] - 200
@@ -266,7 +266,7 @@ def manual_cutting(pycrown_out, crown_rast_all_in, x, y, *_):
     ex1 = chm_array_metadata['extent']
     ex2 = ex1[0] + 200, ex1[1] - 200, ex1[2] + 200, ex1[3] - 200
 
-    dtm_pc = pycrown_out / "DTM.tif"
+    dtm_pc = pycrown_out.parents[0] / "DTM.tif"
     dtm_array, dtm_array_metadata = raster2array(str(dtm_pc))
     ex1a = dtm_array_metadata['extent']
     ex2a = ex1a[0] + 200, ex1a[1] - 200, ex1a[2] + 200, ex1a[3] - 200
@@ -350,8 +350,8 @@ def auto_cutting(_0, _1, _2, _3, top_cor_all, _4, amount_trees_cut):
 
 
 def main(cut_trees_method, amount_trees_cut, random_fraction_cut, path_data, buffer, forest_mask, buffer_peri):
-    buffer = np.int32(buffer)
-    buffer_peri = np.int32(buffer_peri)
+    #buffer = np.int32(buffer)
+    #buffer_peri = np.int32(buffer_peri)
     tt = time.time()
     timeit1 = 'Selected points to cut successfully [{:.3f}s]'
     timeit2 = 'Cut & output CHM/crowns/tops successfully [{:.3f}s]'
@@ -361,7 +361,7 @@ def main(cut_trees_method, amount_trees_cut, random_fraction_cut, path_data, buf
 
     pycrown_out = Path(path_data)
 
-    orig_chm = pycrown_out.parents[1] / 'data' / 'CHM.tif'
+    orig_chm = pycrown_out.parents[0] / 'CHM.tif'
     shutil.copy(orig_chm, pycrown_out / "CHM_noPycrown.tif")
 
     chm_array1, chm_array_metadata1 = raster2array(str(pycrown_out / "CHM_noPycrown.tif"))
@@ -406,7 +406,7 @@ def main(cut_trees_method, amount_trees_cut, random_fraction_cut, path_data, buf
     poly_cut = Polygon((list(zip(ext_nocrop[0:4], ext_nocrop[4:]))))
 
     if forest_mask == 1:
-        forest_mask_in = pycrown_out.parents[1] / 'data' / 'Forest_mask_10m.tif'
+        forest_mask_in = pycrown_out.parents[0] / 'Forest_mask_10m.tif'
         xds_fm = rioxarray.open_rasterio(forest_mask_in)
         a45 = np.where(xds_fm.values == 128, np.nan, xds_fm.values)
         xds_fm.values = a45
@@ -464,15 +464,20 @@ def main(cut_trees_method, amount_trees_cut, random_fraction_cut, path_data, buf
 
 @click.command()
 @click.option('--cut_trees_method', help='auto or random or manual [str]')
+
 @click.option('--amount_trees_cut', default=None, type=float, help='only needs to be set if auto - '
                                                                    'every xth tree to be cut [float]')
+
 @click.option('--random_fraction_cut', default=None, type=float, help='only needs to be set if random - '
                                                                       'fraction of dataset to be cut [float]')
+
 @click.option('--path_in', help='input path [str]')
 
-@click.option('--buffer', help='auto or random or manual [str]')
-@click.option('--buffer_peri', help='auto or random or manual [str]')
-@click.option('--forest_mask', help='auto or random or manual [str]')
+@click.option('--buffer', type=float, help='buffer in meters around individual trees to cut (not necessary if pycrown delineation went well) [float]')
+
+@click.option('--buffer_peri', type=float, help='buffer in meters to perimeter of aoi [float]')
+
+@click.option('--forest_mask', help='auto or random or manual [int]')
 
 def cli(cut_trees_method, amount_trees_cut, random_fraction_cut, path_in, buffer, forest_mask, buffer_peri):
     main(cut_trees_method, amount_trees_cut, random_fraction_cut, path_in, buffer, forest_mask, buffer_peri)
