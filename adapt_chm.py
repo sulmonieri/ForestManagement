@@ -115,9 +115,9 @@ def update_chm(sel_pts, pycrown_out, name_chm, cut_trees_method1, buffer, forest
     top_cor_cut = top_cor_all.drop(top_cor_all.index[to_mask_layer231])
 
     # Remove output shapefiles if they already exist
-    if crown_rast_new.exists:
+    if crown_rast_new.is_file:
         driver.DeleteDataSource(str(crown_rast_new))
-    if top_cor_new.exists:
+    if top_cor_new.is_file:
         driver.DeleteDataSource(str(top_cor_new))
     # Write new shapefiles:
     top_cor_cut.to_file(top_cor_new)
