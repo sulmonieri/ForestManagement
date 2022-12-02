@@ -90,7 +90,7 @@ def update_chm(sel_pts, pycrown_out, name_chm, cut_trees_method1, buffer, forest
     crown_rast_cut: np.array
         new array of all crown polygons
     """
-
+    buffer = np.int32(buffer)
     driver = ogr.GetDriverByName("ESRI Shapefile")
 
     top_cor_new = pycrown_out / "tree_location_top_cor_new.shp"
