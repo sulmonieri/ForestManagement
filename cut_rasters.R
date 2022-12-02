@@ -33,13 +33,13 @@ tpi_crop <- crop(tpi,shp,overwrite=TRUE,filename='aoi/tpi_aoi.tif',gdal=c('COMPR
 slope_crop <- crop(slope,shp,overwrite=TRUE,filename='aoi/slope_aoi.tif',gdal=c('COMPRESS=DEFLATE','PREDICTOR=3'))
 aspect_n_crop <- crop(aspect_n,shp,overwrite=TRUE,filename='aoi/aspect_n_aoi.tif',gdal=c('COMPRESS=DEFLATE','PREDICTOR=3'))
 skyview_crop <- crop(skyview,shp,overwrite=TRUE,filename='aoi/skyview_aoi.tif',gdal=c('COMPRESS=DEFLATE','PREDICTOR=3'))
-fmask_crop <- crop(fmask,shp,overwrite=TRUE,filename='aoi/adapt_chm/fmask_aoi.tif',gdal=c('COMPRESS=DEFLATE','PREDICTOR=3'))
+fmask_crop <- crop(fmask,shp,overwrite=TRUE,filename='aoi/adapt_chm/Forest_mask_10m.tif',gdal=c('COMPRESS=DEFLATE','PREDICTOR=3'))
 
 
 ## DTM needs to be disaggregated to 1m (VHM resolution)
-dtm_crop <- disagg(crop(dtm,shp),5,method='bilinear',filename='aoi/adapt_chm/DTM_aoi.tif',gdal=c('COMPRESS=DEFLATE','PREDICTOR=3'),overwrite=TRUE)
-vhm_crop <- crop(vhm,shp,filename='aoi/adapt_chm/CHM_aoi.tif',gdal=c('COMPRESS=DEFLATE','PREDICTOR=3'), overwrite=TRUE)
+dtm_crop <- disagg(crop(dtm,shp),5,method='bilinear',filename='aoi/adapt_chm/DTM.tif',gdal=c('COMPRESS=DEFLATE','PREDICTOR=3'),overwrite=TRUE)
+vhm_crop <- crop(vhm,shp,filename='aoi/adapt_chm/CHM.tif',gdal=c('COMPRESS=DEFLATE','PREDICTOR=3'), overwrite=TRUE)
 
 ## generate digital surface model
 dsm <- vhm_crop+dtm_crop
-writeRaster(dsm,filename='aoi/adapt_chm/DSM_aoi.tif',gdal=c('COMPRESS=DEFLATE','PREDICTOR=3'),overwrite=TRUE)
+writeRaster(dsm,filename='aoi/adapt_chm/DSM.tif',gdal=c('COMPRESS=DEFLATE','PREDICTOR=3'),overwrite=TRUE)
