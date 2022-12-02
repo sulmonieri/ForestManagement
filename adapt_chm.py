@@ -90,7 +90,7 @@ def update_chm(sel_pts, pycrown_out, name_chm, cut_trees_method1, buffer, forest
     crown_rast_cut: np.array
         new array of all crown polygons
     """
-    buffer = np.int32(buffer)
+    
     driver = ogr.GetDriverByName("ESRI Shapefile")
 
     top_cor_new = pycrown_out / "tree_location_top_cor_new.shp"
@@ -350,6 +350,7 @@ def auto_cutting(_0, _1, _2, _3, top_cor_all, _4, amount_trees_cut):
 
 
 def main(cut_trees_method, amount_trees_cut, random_fraction_cut, path_data, buffer, forest_mask, buffer_peri):
+    buffer = np.int32(buffer)
     buffer_peri = np.int32(buffer_peri)
     tt = time.time()
     timeit1 = 'Selected points to cut successfully [{:.3f}s]'
