@@ -21,7 +21,7 @@ tpi <- rast('nationwide/TPI.tif')
 slope <- rast('nationwide/slope.tif')
 aspect_n <- rast('nationwide/aspect_n.tif')
 skyview <- rast('nationwide/skyview.tif')
-potrad <- rast('nationwide/POTRAD.tif')
+potrad <- rast('nationwide/potrad.tif')
 
 ## read shapfile
 shp <- st_read('shp/BDM1.shp')
