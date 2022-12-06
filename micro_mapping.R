@@ -15,16 +15,16 @@ vhm_sce_raw <- rast('aoi/adapt_chm/results/chm_random_0.25_fm1_buffer0.0m_10m.ti
 vhm_sce <- subst(vhm_sce_raw,NaN,0.02)
 vhm <- aggregate(rast('aoi/adapt_chm/CHM.tif'),10)
 temp <- rast('aoi/temp_aoi.tif')
-rain <- rast('aoi/rain_aoi.tif')
+rain <- rast('aoi/rain_aoi.tif')/10
 twi <- rast('aoi/twi_aoi.tif')
 tpi <- rast('aoi/tpi_aoi.tif')
 slope <- rast('aoi/slope_aoi.tif')
 aspect_n <- rast('aoi/aspect_n_aoi.tif')
 skyview <- rast('aoi/skyview_aoi.tif')
-potrad <- rast('aoi/potrad_aoi.tif')
-trans_sce <- rast('aoi/transm_6_25_cut.tif')
+potrad <- rast('aoi/potrad_aoi.tif')/10
+trans_sce <- rast('aoi/transm_6_25_cut.tif')/100
 transpot_sce <- potrad*trans_sce
-trans <- rast('aoi/transm_6_orig.tif')
+trans <- rast('aoi/transm_6_orig.tif')/100
 transpot <- potrad*trans
 
 
