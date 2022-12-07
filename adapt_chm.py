@@ -316,7 +316,7 @@ def manual_cutting(pycrown_out, crown_rast_all_in, x, y, *_):
 
 
 def random_cutting(_0, _1, _2, _3, top_cor_all, random_fraction_cut, _4):
-    all_trees = top_cor_all[top_cor_all['TH'] > 8]['geometry']  # only select trees >10m
+    all_trees = top_cor_all[top_cor_all['TH'] > 10]['geometry']  # only select trees >10m
     all_trees.index = np.arange(len(all_trees))
     all_trees.reset_index()
     x_coords = all_trees.x
