@@ -465,7 +465,7 @@ def main(cut_trees_method, amount_trees_cut, random_fraction_cut, path_data, buf
 @click.command()
 @click.option('--cut_trees_method', help='auto or random or manual [str]')
 
-@click.option('--amount_trees_cut', default=None, type=float, help='only needs to be set if auto - '
+@click.option('--amount_trees_cut', default=None, type=int, help='only needs to be set if auto - '
                                                                    'every xth tree to be cut [float]')
 
 @click.option('--random_fraction_cut', default=None, type=float, help='only needs to be set if random - '
