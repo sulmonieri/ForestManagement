@@ -24,7 +24,8 @@ skyview <- rast('nationwide/skyview.tif')
 potrad <- rast('nationwide/potrad.tif')
 
 ## read shapfile
-shp <- st_read('shp/BDM1.shp')
+shp <- st_read('shp/Boundaries_ValMustair_LV95.shp')
+shp_buff <- buffer(vect(shp),200)
 
 ## crop rasters and write do disk
 temp_crop <- crop(temp,shp,overwrite=TRUE,filename='aoi/temp_aoi.tif',gdal=c('COMPRESS=DEFLATE','PREDICTOR=3'))
@@ -34,13 +35,13 @@ tpi_crop <- crop(tpi,shp,overwrite=TRUE,filename='aoi/tpi_aoi.tif',gdal=c('COMPR
 slope_crop <- crop(slope,shp,overwrite=TRUE,filename='aoi/slope_aoi.tif',gdal=c('COMPRESS=DEFLATE','PREDICTOR=3'))
 aspect_n_crop <- crop(aspect_n,shp,overwrite=TRUE,filename='aoi/aspect_n_aoi.tif',gdal=c('COMPRESS=DEFLATE','PREDICTOR=3'))
 skyview_crop <- crop(skyview,shp,overwrite=TRUE,filename='aoi/skyview_aoi.tif',gdal=c('COMPRESS=DEFLATE','PREDICTOR=3'))
-fmask_crop <- crop(fmask,shp,overwrite=TRUE,filename='aoi/adapt_chm/Forest_mask_10m.tif',gdal=c('COMPRESS=DEFLATE','PREDICTOR=3'))
+fmask_crop <- crop(fmask,shp,overwrite=TRUE,filename='aoi/adapt_chm/Forest_mask_10m.tif')
 potrad_crop <- crop(potrad,shp,overwrite=TRUE,filename='aoi/potrad_aoi.tif',gdal=c('COMPRESS=DEFLATE','PREDICTOR=2'))
 
 
 ## DTM needs to be disaggregated to 1m (VHM resolution)
-dtm_crop <- disagg(crop(dtm,shp),5,method='bilinear',filename='aoi/adapt_chm/DTM.tif',gdal=c('COMPRESS=DEFLATE','PREDICTOR=3'),overwrite=TRUE)
 vhm_crop <- crop(vhm,shp,filename='aoi/adapt_chm/CHM.tif',gdal=c('COMPRESS=DEFLATE','PREDICTOR=3'), overwrite=TRUE)
+dtm_crop <- crop(disagg(crop(dtm,shp_buff),5,method='bilinear'),vhm_crop,filename='aoi/adapt_chm/DTM.tif',gdal=c('COMPRESS=DEFLATE','PREDICTOR=3'),overwrite=TRUE)
 
 ## generate digital surface model
 dsm <- vhm_crop+dtm_crop
