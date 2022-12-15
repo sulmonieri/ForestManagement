@@ -21,6 +21,7 @@ import pandas as pd
 import rasterio.mask
 from osgeo import ogr
 import random
+import math
 import time
 from pathlib import Path
 import click
@@ -315,7 +316,7 @@ def manual_cutting(pycrown_out, crown_rast_all_in, x, y, *_):
     return selected_pts, poly_2cut
 
 
-def random_cutting(_0, _1, _2, _3, top_cor_all, random_fraction_cut, _4):
+def random_cutting(_0, _1, _2, _3, top_cor_all, random_fraction_cut, _4, _5):
     all_trees = top_cor_all[top_cor_all['TH'] > 10]['geometry']  # only select trees >10m
     all_trees.index = np.arange(len(all_trees))
     all_trees.reset_index()
@@ -338,7 +339,7 @@ def random_cutting(_0, _1, _2, _3, top_cor_all, random_fraction_cut, _4):
     return selected_pts, None
 
 
-def auto_cutting(_0, _1, _2, _3, top_cor_all, _4, amount_trees_cut):
+def auto_cutting(_0, _1, _2, _3, top_cor_all, _4, amount_trees_cut, _5):
     all_trees = top_cor_all[top_cor_all['TH'] > 10]['geometry']  # only select trees >10m
     all_trees.index = np.arange(len(all_trees))
     x_coords = all_trees.x
@@ -348,8 +349,24 @@ def auto_cutting(_0, _1, _2, _3, top_cor_all, _4, amount_trees_cut):
     selected_pts = np.transpose(np.array([sel_pts_x, sel_pts_y]))
     return selected_pts, None
 
+def mfp_cutting(_0, _1, _2, _3, top_cor_all, fraction_cut, _4, group_size):
+    all_trees = top_cor_all[top_cor_all['TH'] > 10]['geometry']  # only select trees >10m
+    all_trees.index = np.arange(len(all_trees))
+    x_coords = all_trees.x
+    y_coords = all_trees.y
+	step = int(group_size/fraction_cut)
+	group_num =  math.ceil(len(x_coords)/step)
+	bool =  [False for i in range(step)]
+	for i in range(group_size):
+		bool[i] = True
+	bool = bool * group_num
+	bool = bool[:len(x_coords)]
+    sel_pts_x = x_coords[bool]
+    sel_pts_y = y_coords[bool]
+    selected_pts = np.transpose(np.array([sel_pts_x, sel_pts_y]))
+    return selected_pts, None
 
-def main(cut_trees_method, amount_trees_cut, random_fraction_cut, path_data, buffer, forest_mask, buffer_peri):
+def main(cut_trees_method, amount_trees_cut, random_fraction_cut, group_size, path_data, buffer, forest_mask, buffer_peri):
     #buffer = np.int32(buffer)
     #buffer_peri = np.int32(buffer_peri)
     tt = time.time()
@@ -443,13 +460,16 @@ def main(cut_trees_method, amount_trees_cut, random_fraction_cut, path_data, buf
     elif cut_trees_method == 'auto':
         name_chm = cut_trees_method+"_"+str(amount_trees_cut)+"_fm"+str(forest_mask)+"_buffer"+str(buffer)+"m"
         cutting_method = auto_cutting
+    elif cut_trees_method == 'mfp':
+        name_chm = cut_trees_method+"_"+str(random_fraction_cut)+"_gs"+str(group_size)+"_fm"+str(forest_mask)+"_buffer"+str(buffer)+"m"
+        cutting_method = mfp_cutting
     else:
         name_chm = None
         cutting_method = None
 
     fig_comp = pycrown_out / ("comp_chm_" + name_chm + ".png")
     selected_pts, selected_path = cutting_method(pycrown_out, crown_rast_all1, x, y, top_cor_all1, random_fraction_cut,
-                                                 amount_trees_cut)
+                                                 amount_trees_cut, group_size)
 
     print(timeit1.format(time.time() - tt))
     top_cor_cut, crown_rast_cut = update_chm(selected_pts, pycrown_out, name_chm, cut_trees_method, buffer, forest_mask,
@@ -463,13 +483,16 @@ def main(cut_trees_method, amount_trees_cut, random_fraction_cut, path_data, buf
 
 
 @click.command()
-@click.option('--cut_trees_method', help='auto or random or manual [str]')
+@click.option('--cut_trees_method', help='auto or random or manual or mfp [str]')
 
 @click.option('--amount_trees_cut', default=None, type=int, help='only needs to be set if auto - '
                                                                    'every xth tree to be cut [float]')
 
 @click.option('--random_fraction_cut', default=None, type=float, help='only needs to be set if random - '
                                                                       'fraction of dataset to be cut [float]')
+
+@click.option('--mfp_group_size', default=None, type=int, help='only needs to be set if mfp_cutting - '
+                                                                      'group size of trees to be cut in mfp [int]')
 
 @click.option('--path_in', help='input path [str]')
 
@@ -479,8 +502,8 @@ def main(cut_trees_method, amount_trees_cut, random_fraction_cut, path_data, buf
 
 @click.option('--forest_mask', type=int, help='use forest mask [1] or not [0] [int]')
 
-def cli(cut_trees_method, amount_trees_cut, random_fraction_cut, path_in, buffer, forest_mask, buffer_peri):
-    main(cut_trees_method, amount_trees_cut, random_fraction_cut, path_in, buffer, forest_mask, buffer_peri)
+def cli(cut_trees_method, amount_trees_cut, random_fraction_cut, mfp_group_size, path_in, buffer, forest_mask, buffer_peri):
+    main(cut_trees_method, amount_trees_cut, random_fraction_cut, mfp_group_size, path_in, buffer, forest_mask, buffer_peri)
 
 
 if __name__ == '__main__':
@@ -488,9 +511,10 @@ if __name__ == '__main__':
     if USE_CLI_ARGS:
         cli()
     else:
-        cut_trees_method = 'random'  # options: 'manual' , 'auto', 'random'-
+        cut_trees_method = 'random'  # options: 'manual' , 'auto', 'random', 'mfp'
         amount_trees_cut = 3  # if using auto setting - every xth tree to cut (if random/manual - ignore)
         random_fraction_cut = 0.25  # if using random setting - which fraction of all trees should be cut? (if auto/manual - ignore)
+        mfp_group_size = 5 # if using mountain forest plentering: group size of trees to be cut
         buffer = 0  # if wanting to add buffer around each individual tree crown [if pycrown delination is done well this should not be necessary]
         buffer_peri = 200  # meters added to perimeter of BDM site (not to be incorporated into this analysis, but for transmissivity calculations)
         forest_mask = 1  # set to 0 or 1 => select x percent of forest within forest mask only [default: 1]
