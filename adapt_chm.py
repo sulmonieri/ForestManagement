@@ -354,13 +354,13 @@ def mfp_cutting(_0, _1, _2, _3, top_cor_all, fraction_cut, _4, group_size):
     all_trees.index = np.arange(len(all_trees))
     x_coords = all_trees.x
     y_coords = all_trees.y
-	step = int(group_size/fraction_cut)
-	group_num =  math.ceil(len(x_coords)/step)
-	bool =  [False for i in range(step)]
-	for i in range(group_size):
-		bool[i] = True
-	bool = bool * group_num
-	bool = bool[:len(x_coords)]
+    step = int(group_size/fraction_cut)
+    group_num =  math.ceil(len(x_coords)/step)
+    bool =  [False for i in range(step)]
+    for i in range(group_size):
+        bool[i] = True
+    bool = bool * group_num
+    bool = bool[:len(x_coords)]
     sel_pts_x = x_coords[bool]
     sel_pts_y = y_coords[bool]
     selected_pts = np.transpose(np.array([sel_pts_x, sel_pts_y]))
