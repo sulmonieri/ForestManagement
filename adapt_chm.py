@@ -348,9 +348,11 @@ def mfp_cutting(_0, crown_rast_all, _1, _2, top_cor_all, fraction_cut, _4, _5):
         x_coords = pd.concat([x_coords,pd.Series(x_coord_neighbors, dtype='float64')])
         y_coords = pd.concat([y_coords,pd.Series(y_coord_neighbors, dtype='float64')])
 
-    print('Average are of cut tree cluster',np.mean(areas))
+    print('Average area of cut tree cluster',f"{np.mean(areas):.1f}"+'m2')
     selected_pts = np.transpose(np.array([x_coords, y_coords]))
     selected_pts = np.unique(selected_pts, axis=0)
+    
+    print('Percentage of trees cut',f"{selected_pts.shape[0]/all_crowns.shape[0]:.1%}")
     return selected_pts, None
 
 def main(cut_trees_method, amount_trees_cut, random_fraction_cut, group_size, path_data, buffer, forest_mask, buffer_peri):
@@ -429,8 +431,8 @@ def main(cut_trees_method, amount_trees_cut, random_fraction_cut, group_size, pa
 
         crown_rast_all.drop(crown_rast_all.index[to_mask_layer231], inplace=True)
         top_cor_all.drop(top_cor_all.index[to_mask_layer23], inplace=True)
-        print('Number of tree tops',np.size(top_cor_all))
-        print('Number of tree Polygons',np.size(crown_rast_all))
+        print('Number of tree tops',top_cor_all.shape[0])
+        print('Number of tree Polygons',crown_rast_all.shape[0])
         
     # cut extra buffer from input data: (needed so we actually only cut out trees in the area we are interested in...
     crown_rast_all1 = crown_rast_all[crown_rast_all.geometry.centroid.within(poly_cut)]
