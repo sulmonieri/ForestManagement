@@ -8,7 +8,6 @@ Desc: Script to manipulate shapefiles (canopy height models) for land use change
 Created on 20.01.22 09:28
 @author: malle
 """
-
 from osgeo import gdal
 import numpy as np
 import geopandas as gpd
@@ -30,9 +29,7 @@ import rioxarray
 import os
 import subprocess
 
-
 USE_CLI_ARGS = True  # set to True if running from the command line, set to False if running from PyCharm
-
 
 class ManualSelect:
 
@@ -40,19 +37,16 @@ class ManualSelect:
         self.canvas = ax1.figure.canvas
         self.collection = collection
         self.alpha_other = alpha_other
-
         self.xys = collection.get_offsets()
         self.Npts = len(self.xys)
-
         self.fc = collection.get_facecolors()
         self.fc = np.tile(self.fc, (self.Npts, 1))
-
         self.poly = PolygonSelector(ax1, self.onselect,
                                     props=dict(color='g', alpha=1),
                                     handle_props=dict(mec='g', mfc='g', alpha=1))
         self.path = None
         self.ind = []
-
+        
     def onselect(self, verts):
         path = Path1(verts)
         self.ind = np.nonzero(path.contains_points(self.xys))[0]
@@ -61,14 +55,12 @@ class ManualSelect:
         self.collection.set_facecolors(self.fc)
         self.canvas.draw_idle()
         self.path = path
-
+        
     def disconnect(self):
         self.poly.disconnect_events()
         self.fc[:, -1] = 1
         self.collection.set_facecolors(self.fc)
         self.canvas.draw_idle()
-
-
 
 def update_chm(sel_pts, pycrown_out, name_chm, cut_trees_method1, buffer, forest_mask, poly_2cut, crown_rast_all,
                top_cor_all):
@@ -91,9 +83,7 @@ def update_chm(sel_pts, pycrown_out, name_chm, cut_trees_method1, buffer, forest
     crown_rast_cut: np.array
         new array of all crown polygons
     """
-    
     driver = ogr.GetDriverByName("ESRI Shapefile")
-
     top_cor_new = pycrown_out / "tree_location_top_cor_new.shp"
     chm_pc_adapt = pycrown_out / Path("chm_" + name_chm + ".tif")
     crown_rast_new = pycrown_out / "tree_crown_poly_raster_new.shp"
@@ -104,7 +94,6 @@ def update_chm(sel_pts, pycrown_out, name_chm, cut_trees_method1, buffer, forest
 
     top_cor_all.reset_index(drop=True, inplace=True)
     crown_rast_all.reset_index(drop=True, inplace=True)
-
     df_coords = pd.DataFrame({'x': sel_pts[:, 0], 'y': sel_pts[:, 1]})
     df_coords['coords'] = list(zip(df_coords['x'], df_coords['y']))
     df_coords['coords'] = df_coords['coords'].apply(Point)
@@ -120,6 +109,7 @@ def update_chm(sel_pts, pycrown_out, name_chm, cut_trees_method1, buffer, forest
         driver.DeleteDataSource(str(crown_rast_new))
     if top_cor_new.is_file():
         driver.DeleteDataSource(str(top_cor_new))
+
     # Write new shapefiles:
     top_cor_cut.to_file(top_cor_new)
     crown_rast_cut.to_file(crown_rast_new)
@@ -152,7 +142,6 @@ def update_chm(sel_pts, pycrown_out, name_chm, cut_trees_method1, buffer, forest
 
     return top_cor_cut, crown_rast_cut
 
-
 def raster2array(geotif_file):
     """
     Convert raster to array
@@ -167,7 +156,6 @@ def raster2array(geotif_file):
     chm_array_metadata: string
         all metadata used to convert raster2array
     """
-
     metadata = {}
     dataset = gdal.Open(geotif_file)
     metadata['array_rows'] = dataset.RasterYSize
@@ -212,9 +200,7 @@ def raster2array(geotif_file):
     elif metadata['bands'] > 1:
         print('More than one band ... need to modify function for case of multiple bands')
 
-
 def plot_figs(top_cor_cut, crown_rast_all, crown_rast_cut, x, y, pycrown_out, fig_comp, name_chm):
-
     chm_pc_adapt = pycrown_out / Path("chm_" + name_chm + ".tif")
     chm_array_new, chm_array_metadata_new = raster2array(str(chm_pc_adapt))
     chm_array_new[chm_array_new < 1] = np.nan
@@ -242,7 +228,6 @@ def plot_figs(top_cor_cut, crown_rast_all, crown_rast_cut, x, y, pycrown_out, fi
     plt.contour(np.flipud(dtm_array[200:-200, 200:-200]), extent=ex2b, linewidths=0.7, colors="red",
                 levels=list(range(0, 3000, 10)))
     # ax_old.scatter(x, y, s=1, marker='x', color='r', linewidth=0.2)
-
     ax_new = fig1.add_subplot(122)
     ax_new.set_title('Modified CHM\n #Trees = '+str(len(top_cor_cut['geometry'].x)), fontsize=9)
     plt.imshow(chm_array_new[200:-200, 200:-200], extent=ex2a, alpha=1)
@@ -250,8 +235,10 @@ def plot_figs(top_cor_cut, crown_rast_all, crown_rast_cut, x, y, pycrown_out, fi
     cbar2.set_label('Canopy height [m]', rotation=270, labelpad=20)
     fig1.savefig(fig_comp, dpi=350, bbox_inches='tight')
     plt.close()
+
     # 3) for analysis I also need tif @10m resolution
     chm_pc_adapt_10m = pycrown_out / Path("chm_" + name_chm + "_10m.tif")
+
     if os.path.exists(chm_pc_adapt_10m):
         os.remove(chm_pc_adapt_10m)
     # use gdal lib (file can't exist yet!)
@@ -259,9 +246,7 @@ def plot_figs(top_cor_cut, crown_rast_all, crown_rast_cut, x, y, pycrown_out, fi
     args = ['gdalwarp', '-tr', '10.0', '10.0', '-r', 'near', chm_pc_adapt, chm_pc_adapt_10m]
     subprocess.call(args)
 
-
 def manual_cutting(pycrown_out, crown_rast_all_in, x, y, *_):
-
     chm_pc = pycrown_out / "CHM_noPycrown.tif"
     chm_array, chm_array_metadata = raster2array(str(chm_pc))
     ex1 = chm_array_metadata['extent']
@@ -282,6 +267,7 @@ def manual_cutting(pycrown_out, crown_rast_all_in, x, y, *_):
     ax.axis('equal')
     ax.get_xaxis().set_ticks([])
     ax.get_yaxis().set_ticks([])
+
     plt.contour(np.flipud(dtm_array[200:-200, 200:-200]), extent=ex2a, linewidths=1.9, colors="red",
                 levels=list(range(0, 3000, 100)))
 
@@ -315,7 +301,6 @@ def manual_cutting(pycrown_out, crown_rast_all_in, x, y, *_):
     poly_2cut = poly_2cut1
     return selected_pts, poly_2cut
 
-
 def random_cutting(_0, _1, _2, _3, top_cor_all, random_fraction_cut, _4, _5):
     all_trees = top_cor_all[top_cor_all['TH'] > 10]['geometry']  # only select trees >10m
     all_trees.index = np.arange(len(all_trees))
@@ -338,7 +323,6 @@ def random_cutting(_0, _1, _2, _3, top_cor_all, random_fraction_cut, _4, _5):
     selected_pts = np.transpose(np.array([sel_pts_x, sel_pts_y]))
     return selected_pts, None
 
-
 def auto_cutting(_0, _1, _2, _3, top_cor_all, _4, amount_trees_cut, _5):
     all_trees = top_cor_all[top_cor_all['TH'] > 10]['geometry']  # only select trees >10m
     all_trees.index = np.arange(len(all_trees))
@@ -349,21 +333,24 @@ def auto_cutting(_0, _1, _2, _3, top_cor_all, _4, amount_trees_cut, _5):
     selected_pts = np.transpose(np.array([sel_pts_x, sel_pts_y]))
     return selected_pts, None
 
-def mfp_cutting(_0, _1, _2, _3, top_cor_all, fraction_cut, _4, group_size):
-    all_trees = top_cor_all[top_cor_all['TH'] > 10]['geometry']  # only select trees >10m
-    all_trees.index = np.arange(len(all_trees))
-    x_coords = all_trees.x
-    y_coords = all_trees.y
-    step = int(group_size/fraction_cut)
-    group_num =  math.ceil(len(x_coords)/step)
-    bool =  [False for i in range(step)]
-    for i in range(group_size):
-        bool[i] = True
-    bool = bool * group_num
-    bool = bool[:len(x_coords)]
-    sel_pts_x = x_coords[bool]
-    sel_pts_y = y_coords[bool]
-    selected_pts = np.transpose(np.array([sel_pts_x, sel_pts_y]))
+def mfp_cutting(_0, crown_rast_all, _1, _2, top_cor_all, fraction_cut, _4, _5):
+    all_crowns = crown_rast_all[crown_rast_all['TTH'] > 10] #  only select trees >10m
+    all_crowns.reset_index(drop=True, inplace=True)
+    crowns_select = all_crowns[::round(1/fraction_cut)]
+    x_coords = crowns_select['geometry'].centroid.x
+    y_coords = crowns_select['geometry'].centroid.y
+
+    areas = []
+    for index, row in crowns_select.iterrows():
+        x_coord_neighbors = all_crowns[all_crowns.geometry.touches(row['geometry'])].centroid.x.tolist()
+        y_coord_neighbors = all_crowns[all_crowns.geometry.touches(row['geometry'])].centroid.y.tolist()
+        areas.append((row['geometry'].area + sum(all_crowns[all_crowns.geometry.touches(row['geometry'])].area.tolist())))
+        x_coords = pd.concat([x_coords,pd.Series(x_coord_neighbors, dtype='float64')])
+        y_coords = pd.concat([y_coords,pd.Series(y_coord_neighbors, dtype='float64')])
+
+    print('Average are of cut tree cluster',np.mean(areas))
+    selected_pts = np.transpose(np.array([x_coords, y_coords]))
+    selected_pts = np.unique(selected_pts, axis=0)
     return selected_pts, None
 
 def main(cut_trees_method, amount_trees_cut, random_fraction_cut, group_size, path_data, buffer, forest_mask, buffer_peri):
@@ -442,9 +429,9 @@ def main(cut_trees_method, amount_trees_cut, random_fraction_cut, group_size, pa
 
         crown_rast_all.drop(crown_rast_all.index[to_mask_layer231], inplace=True)
         top_cor_all.drop(top_cor_all.index[to_mask_layer23], inplace=True)
-        print(np.size(top_cor_all))
-        print(np.size(crown_rast_all))
-
+        print('Number of tree tops',np.size(top_cor_all))
+        print('Number of tree Polygons',np.size(crown_rast_all))
+        
     # cut extra buffer from input data: (needed so we actually only cut out trees in the area we are interested in...
     crown_rast_all1 = crown_rast_all[crown_rast_all.geometry.centroid.within(poly_cut)]
     top_cor_all1 = top_cor_all[top_cor_all.geometry.within(poly_cut)]
@@ -470,50 +457,39 @@ def main(cut_trees_method, amount_trees_cut, random_fraction_cut, group_size, pa
     fig_comp = pycrown_out / ("comp_chm_" + name_chm + ".png")
     selected_pts, selected_path = cutting_method(pycrown_out, crown_rast_all1, x, y, top_cor_all1, random_fraction_cut,
                                                  amount_trees_cut, group_size)
-
     print(timeit1.format(time.time() - tt))
     top_cor_cut, crown_rast_cut = update_chm(selected_pts, pycrown_out, name_chm, cut_trees_method, buffer, forest_mask,
                                              selected_path, crown_rast_all1, top_cor_all1)
-
     print(timeit2.format(time.time() - tt))
     plot_figs(top_cor_cut, crown_rast_all1, crown_rast_cut, x, y, pycrown_out, fig_comp, name_chm)
 
     print(timeit3.format(time.time() - tt))
     return None
 
-
 @click.command()
 @click.option('--cut_trees_method', help='auto or random or manual or mfp [str]')
-
 @click.option('--amount_trees_cut', default=None, type=int, help='only needs to be set if auto - '
                                                                    'every xth tree to be cut [float]')
-
 @click.option('--random_fraction_cut', default=None, type=float, help='only needs to be set if random - '
                                                                       'fraction of dataset to be cut [float]')
-
 @click.option('--mfp_group_size', default=None, type=int, help='only needs to be set if mfp_cutting - '
                                                                       'group size of trees to be cut in mfp [int]')
-
 @click.option('--path_in', help='input path [str]')
-
 @click.option('--buffer', type=float, help='buffer in meters around individual trees to cut (not necessary if pycrown delineation went well) [float]')
-
 @click.option('--buffer_peri', type=float, help='buffer in meters to perimeter of aoi [float]')
-
 @click.option('--forest_mask', type=int, help='use forest mask [1] or not [0] [int]')
 
 def cli(cut_trees_method, amount_trees_cut, random_fraction_cut, mfp_group_size, path_in, buffer, forest_mask, buffer_peri):
     main(cut_trees_method, amount_trees_cut, random_fraction_cut, mfp_group_size, path_in, buffer, forest_mask, buffer_peri)
-
 
 if __name__ == '__main__':
 
     if USE_CLI_ARGS:
         cli()
     else:
-        cut_trees_method = 'random'  # options: 'manual' , 'auto', 'random', 'mfp'
-        amount_trees_cut = 3  # if using auto setting - every xth tree to cut (if random/manual - ignore)
-        random_fraction_cut = 0.25  # if using random setting - which fraction of all trees should be cut? (if auto/manual - ignore)
+        cut_trees_method = 'mfp'  # options: 'manual' , 'auto', 'random', 'mfp'
+        amount_trees_cut = 100  # if using auto setting - every xth tree to cut (if random/manual - ignore)
+        random_fraction_cut = 0.01  # if using random setting - which fraction of all trees should be cut? (if auto/manual - ignore)
         mfp_group_size = 5 # if using mountain forest plentering: group size of trees to be cut
         buffer = 0  # if wanting to add buffer around each individual tree crown [if pycrown delination is done well this should not be necessary]
         buffer_peri = 100  # meters added to perimeter of BDM site (not to be incorporated into this analysis, but for transmissivity calculations)
