@@ -450,7 +450,7 @@ def main(cut_trees_method, amount_trees_cut, random_fraction_cut, group_size, pa
         name_chm = cut_trees_method+"_"+str(amount_trees_cut)+"_fm"+str(forest_mask)+"_buffer"+str(buffer)+"m"
         cutting_method = auto_cutting
     elif cut_trees_method == 'mfp':
-        name_chm = cut_trees_method+"_"+str(random_fraction_cut)+"_gs"+str(group_size)+"_fm"+str(forest_mask)+"_buffer"+str(buffer)+"m"
+        name_chm = cut_trees_method+"_"+str(random_fraction_cut)+"_fm"+str(forest_mask)+"_buffer"+str(buffer)+"m"
         cutting_method = mfp_cutting
     else:
         name_chm = None
