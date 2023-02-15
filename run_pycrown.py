@@ -27,7 +27,7 @@ if __name__ == '__main__':
     PC.filter_chm(3, ws_in_pixels=True)
 
     # Tree Detection with local maximum filter
-    PC.tree_detection(PC.chm, ws=3, ws_in_pixels=True, hmin=1.5)
+    PC.tree_detection(PC.chm, ws=3, ws_in_pixels=True, hmin=2.5)
 
     # Clip trees to bounding box (no trees on image edge)
     # original extent: 1802140, 1802418, 5467295, 5467490
@@ -37,7 +37,7 @@ if __name__ == '__main__':
 
     # Crown Delineation
     PC.crown_delineation(algorithm='dalponteCIRC_numba', th_tree=1.5,
-                         th_seed=0.1, th_crown=0.1, max_crown=12.)
+                         th_seed=0.1, th_crown=0.1, max_crown=10.)
 
     # Correct tree tops on steep terrain
     PC.correct_tree_tops()
@@ -47,7 +47,7 @@ if __name__ == '__main__':
     PC.get_tree_height_elevation(loc='top_cor')
 
     # Screen small trees
-    PC.screen_small_trees(hmin=1.5, loc='top')
+    PC.screen_small_trees(hmin=2, loc='top')
 
     # Convert raster crowns to polygons
     PC.crowns_to_polys_raster()
