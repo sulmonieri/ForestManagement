@@ -1,12 +1,15 @@
 # -*- coding: utf-8 -*-
 """
 Desc: Script to manipulate shapefiles (canopy height models) for land use change experiments
-3 Options implemented to remove trees: 'manual' , 'auto', 'random'
+4 Options implemented to remove trees: 'manual' , 'auto', 'random', 'mfp'
 'manual' allows user to select area of interest to remove all trees within selected perimeter (e.g. wind-throw events)
 'auto' allows user to specify a number, based on which every xth tree will be removed
-'random ' allows user to specify fraction of forest which will be randomly removed
+'random' allows user to specify fraction of forest which will be randomly removed
+'mfp' allows user to specify a fraction of trees which will be removed together with direct neighbouring trees,
+thereby simulating mountain forest plentering
 Created on 20.01.22 09:28
 @author: malle
+@edited by: sulmonie 10.01.2023
 """
 from osgeo import gdal
 import numpy as np
@@ -32,6 +35,7 @@ import subprocess
 USE_CLI_ARGS = True  # set to True if running from the command line, set to False if running from PyCharm
 
 class ManualSelect:
+## Python Class to graphically select an area to cut trees
 
     def __init__(self, ax1, collection, alpha_other=0.1):
         self.canvas = ax1.figure.canvas
@@ -75,7 +79,7 @@ def update_chm(sel_pts, pycrown_out, name_chm, cut_trees_method1, buffer, forest
     name_chm : str
         add on for CHM name
     cut_trees_method1 : str
-        manual/auto/random?
+        manual/auto/random/mfp?
     Returns
     =======
     top_cor_cut : np.array
@@ -115,7 +119,7 @@ def update_chm(sel_pts, pycrown_out, name_chm, cut_trees_method1, buffer, forest
     crown_rast_cut.to_file(crown_rast_new)
 
     # if manual, lay a convex hull around outermost dimension of selected tree crown polygons and cut out everything
-    # within it; if automatic/random, only cut out trees that are above 10m (selected in previous step), and apply a 1m
+    # within it; if automatic/random/mfp, only cut out trees that are above 10m (selected in previous step), and apply a 1m
     # buffer around each tree top polygon
     if cut_trees_method1 == 'manual':
         a2 = ([[p[0], p[1]] for p in np.array(poly_2cut)[0]])
@@ -148,7 +152,7 @@ def raster2array(geotif_file):
     Parameters
     ==========
     geotif_file : path to .tif
-        geotif of CHM
+        geotiff of CHM
     Returns
     =======
     asp_array : array
@@ -247,6 +251,7 @@ def plot_figs(top_cor_cut, crown_rast_all, crown_rast_cut, x, y, pycrown_out, fi
     subprocess.call(args)
 
 def manual_cutting(pycrown_out, crown_rast_all_in, x, y, *_):
+    ## Function to cut trees manually
     chm_pc = pycrown_out / "CHM_noPycrown.tif"
     chm_array, chm_array_metadata = raster2array(str(chm_pc))
     ex1 = chm_array_metadata['extent']
@@ -302,6 +307,7 @@ def manual_cutting(pycrown_out, crown_rast_all_in, x, y, *_):
     return selected_pts, poly_2cut
 
 def random_cutting(_0, _1, _2, _3, top_cor_all, random_fraction_cut, _4, _5):
+    ## Function to cut a percentage of randomly selected trees
     all_trees = top_cor_all[top_cor_all['TH'] > 10]['geometry']  # only select trees >10m
     all_trees.index = np.arange(len(all_trees))
     all_trees.reset_index()
@@ -324,6 +330,7 @@ def random_cutting(_0, _1, _2, _3, top_cor_all, random_fraction_cut, _4, _5):
     return selected_pts, None
 
 def auto_cutting(_0, _1, _2, _3, top_cor_all, _4, amount_trees_cut, _5):
+    ## Function to cut every n-th tree
     all_trees = top_cor_all[top_cor_all['TH'] > 10]['geometry']  # only select trees >10m
     all_trees.index = np.arange(len(all_trees))
     x_coords = all_trees.x
@@ -334,6 +341,7 @@ def auto_cutting(_0, _1, _2, _3, top_cor_all, _4, amount_trees_cut, _5):
     return selected_pts, None
 
 def mfp_cutting(_0, crown_rast_all, _1, _2, top_cor_all, fraction_cut, _4, _5):
+    ## Function to cut a fraction of trees together with their direct neighbours (mountain forest plentering)
     all_crowns = crown_rast_all[crown_rast_all['TTH'] > 10] #  only select trees >10m
     all_crowns.reset_index(drop=True, inplace=True)
     crowns_select = all_crowns[::round(1/fraction_cut)]
@@ -356,6 +364,7 @@ def mfp_cutting(_0, crown_rast_all, _1, _2, top_cor_all, fraction_cut, _4, _5):
     return selected_pts, None
 
 def main(cut_trees_method, amount_trees_cut, random_fraction_cut, group_size, path_data, buffer, forest_mask, buffer_peri):
+    ## Main processing Function
     #buffer = np.int32(buffer)
     #buffer_peri = np.int32(buffer_peri)
     tt = time.time()
